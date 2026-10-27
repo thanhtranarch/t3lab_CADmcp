@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Autoloader manifest. install.ps1 copies this folder layout to
+     %APPDATA%\Autodesk\ApplicationPlugins\T3LabCAD.bundle (a trusted location, no SECURELOAD prompt). -->
+<ApplicationPackage SchemaVersion="1.0"
+                    AutodeskProduct="AutoCAD"
+                    ProductType="Application"
+                    Name="T3Lab CAD MCP"
+                    Description="MCP server inside AutoCAD: lets Claude read and edit the open drawing."
+                    AppVersion="1.0.0"
+                    Author="T3Lab"
+                    ProductCode="{CAFE7E02-09EC-491D-80C6-E1FC82276248}"
+                    UpgradeCode="{D3291EDA-AF1C-460D-8934-1A18738D05EC}">
+  <CompanyDetails Name="T3Lab" />
+  <Components Description="AutoCAD 2021-2024 (.NET Framework 4.8)">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.0" SeriesMax="R24.3" />
+    <ComponentEntry AppName="T3LabCAD"
+                    ModuleName="./Contents/T3LabCAD.Loader.dll"
+                    AppDescription="T3Lab CAD MCP loader (starts the MCP server, T3Lab ribbon tab)"
+                    LoadOnAutoCADStartup="True">
+      <Commands GroupName="T3LAB">
+        <Command Local="T3MCPSTART" Global="T3MCPSTART" />
+        <Command Local="T3MCPSTOP" Global="T3MCPSTOP" />
+        <Command Local="T3MCPSTATUS" Global="T3MCPSTATUS" />
+        <Command Local="T3MCPRELOAD" Global="T3MCPRELOAD" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+</ApplicationPackage>

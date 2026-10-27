@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- MCP server + tools. Loaded by T3LabCAD.Loader from bytes, so it can be
+       rebuilt and reloaded (T3MCPRELOAD / reload_addin) while AutoCAD runs. -->
+  <PropertyGroup>
+    <AssemblyName>T3LabCAD.Core</AssemblyName>
+    <RootNamespace>T3LabCAD.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+</Project>

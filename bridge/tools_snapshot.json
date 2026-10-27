@@ -1,0 +1,989 @@
+{
+ "tools": [
+  {
+   "name": "get_status",
+   "title": "AutoCAD status",
+   "description": "Start here. AutoCAD version, open drawings, and for the active drawing: units, current layer/layout/space, entity counts in model space, drawing extents and whether a command is running.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   },
+   "annotations": {
+    "title": "AutoCAD status",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "get_sysvars",
+   "title": "Read system variables",
+   "description": "Read AutoCAD system variables, e.g. INSUNITS, OSMODE, LTSCALE, DIMSCALE, CANNOSCALE, CLAYER.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "System variable names"
+     }
+    },
+    "required": [
+     "names"
+    ]
+   },
+   "annotations": {
+    "title": "Read system variables",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "set_sysvar",
+   "title": "Set a system variable",
+   "description": "Set one AutoCAD system variable. The value is converted to the variable type (integer, real, string or point).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "System variable name"
+     },
+     "value": {
+      "description": "New value"
+     }
+    },
+    "required": [
+     "name",
+     "value"
+    ]
+   },
+   "annotations": {
+    "title": "Set a system variable",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "activate_document",
+   "title": "Switch drawing",
+   "description": "Make another open drawing the active one (all other tools act on the active drawing). Match by full path, file name, or file name without extension.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "document": {
+      "type": "string",
+      "description": "Drawing name or path, see get_status"
+     }
+    },
+    "required": [
+     "document"
+    ]
+   },
+   "annotations": {
+    "title": "Switch drawing",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "open_document",
+   "title": "Open drawing",
+   "description": "Open a .dwg (or .dxf) file in AutoCAD and make it active. If it is already open it is just activated.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Full path of the file"
+     },
+     "read_only": {
+      "type": "boolean",
+      "description": "Open read-only (default false)"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "annotations": {
+    "title": "Open drawing",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "new_document",
+   "title": "New drawing",
+   "description": "Create a new drawing from a template (default acadiso.dwt, metric) and make it active.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "template": {
+      "type": "string",
+      "description": "Template file name or path, e.g. acadiso.dwt or acad.dwt"
+     }
+    }
+   },
+   "annotations": {
+    "title": "New drawing",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "save_document",
+   "title": "Save drawing",
+   "description": "Save the active drawing. No path: save in place. A .dwg path: Save As (the drawing is renamed). A .dxf path: export a DXF copy (the open drawing keeps its name).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Optional target path (.dwg or .dxf)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Save drawing",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "close_document",
+   "title": "Close drawing",
+   "description": "Close a drawing (default: the active one). Refuses when there are unsaved changes unless save=true or discard_changes=true.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "document": {
+      "type": "string",
+      "description": "Drawing name or path (default active)"
+     },
+     "save": {
+      "type": "boolean",
+      "description": "Save before closing"
+     },
+     "discard_changes": {
+      "type": "boolean",
+      "description": "Close without saving: unsaved changes are lost"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Close drawing",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "list_layouts",
+   "title": "List layouts",
+   "description": "Model and paper space layouts (sheets) of the active drawing with tab order, viewport count, paper size and plotter.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   },
+   "annotations": {
+    "title": "List layouts",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "activate_layout",
+   "title": "Switch layout",
+   "description": "Make a layout current (Model or a paper space layout name).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Layout name, or Model"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Switch layout",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "list_layers",
+   "title": "List layers",
+   "description": "Layers of the active drawing: color, linetype, lineweight, on/off, frozen, locked, plot, current. Xref layers (NAME|LAYER) are skipped unless include_xref=true.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Wildcard filter, e.g. A-WALL* (default all)"
+     },
+     "include_xref": {
+      "type": "boolean",
+      "description": "Include xref-dependent layers (default false)"
+     },
+     "with_counts": {
+      "type": "boolean",
+      "description": "Also count entities per layer in model and paper space (slower)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "List layers",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "set_layer",
+   "title": "Create or edit layer",
+   "description": "Create a layer (if missing) and/or change it: rename, color, linetype, lineweight, on, frozen, locked, plot, description, make current.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Layer name"
+     },
+     "create": {
+      "type": "boolean",
+      "description": "Create the layer when it does not exist (default true)"
+     },
+     "new_name": {
+      "type": "string",
+      "description": "Rename the layer"
+     },
+     "color": {
+      "description": "ACI 1-255, color name, #RRGGBB or [r, g, b]"
+     },
+     "linetype": {
+      "type": "string",
+      "description": "Linetype name (loaded from acadiso.lin if needed)"
+     },
+     "lineweight": {
+      "description": "Hundredths of a mm, e.g. 25 = 0.25 mm, or Default"
+     },
+     "on": {
+      "type": "boolean",
+      "description": "Layer on"
+     },
+     "frozen": {
+      "type": "boolean",
+      "description": "Layer frozen"
+     },
+     "locked": {
+      "type": "boolean",
+      "description": "Layer locked"
+     },
+     "plot": {
+      "type": "boolean",
+      "description": "Layer plots"
+     },
+     "description": {
+      "type": "string",
+      "description": "Layer description"
+     },
+     "make_current": {
+      "type": "boolean",
+      "description": "Make it the current layer"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Create or edit layer",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "delete_layer",
+   "title": "Delete layer",
+   "description": "Delete an unused layer. With merge_into, first moves every entity on it (including inside block definitions) to that layer.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Layer to delete"
+     },
+     "merge_into": {
+      "type": "string",
+      "description": "Layer that receives its entities"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Delete layer",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "query_entities",
+   "title": "Find entities",
+   "description": "Find entities in a space (or by handle) with filters, and get their geometry. Returns total_matched, counts_by_type / counts_by_layer and one page of entities (limit/offset). Types are DXF names: LINE, LWPOLYLINE, CIRCLE, ARC, TEXT, MTEXT, INSERT (block reference), DIMENSION, HATCH, POINT, SPLINE, ELLIPSE, MULTILEADER, VIEWPORT... Use detail=count to only count, full for color/linetype/bbox/all vertices.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "space": {
+      "type": "string",
+      "description": "model, paper, current (default) or a layout name"
+     },
+     "types": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "DXF type names, wildcards allowed"
+     },
+     "layers": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layer names, wildcards allowed"
+     },
+     "block_names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "For INSERT: block names (dynamic blocks by their visible name), wildcards allowed"
+     },
+     "text_contains": {
+      "type": "string",
+      "description": "Keep entities whose text, attribute values or block name contain this (case-insensitive)"
+     },
+     "window": {
+      "type": "array",
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "description": "[[x1, y1], [x2, y2]] rectangle in WCS"
+     },
+     "window_mode": {
+      "type": "string",
+      "enum": [
+       "intersect",
+       "inside"
+      ],
+      "description": "intersect (default): bounding box overlaps the window; inside: fully inside"
+     },
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "detail": {
+      "type": "string",
+      "enum": [
+       "summary",
+       "full",
+       "count"
+      ],
+      "description": "summary (default), full or count"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max entities returned (default 100, max 2000)"
+     },
+     "offset": {
+      "type": "integer",
+      "description": "Skip this many matches (paging)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Find entities",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "get_texts",
+   "title": "Read texts",
+   "description": "All readable text in a space: TEXT, MTEXT (plain), block attributes (ATTRIB, with block name and tag) and multileader text, with position and height. Good for reading a drawing: room names, labels, title block fields.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "space": {
+      "type": "string",
+      "description": "model, paper, current (default) or a layout name"
+     },
+     "contains": {
+      "type": "string",
+      "description": "Keep texts containing this (case-insensitive)"
+     },
+     "layers": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layer names, wildcards allowed"
+     },
+     "include_attributes": {
+      "type": "boolean",
+      "description": "Include block attribute values (default true)"
+     },
+     "sort": {
+      "type": "string",
+      "enum": [
+       "drawing",
+       "reading"
+      ],
+      "description": "drawing (default) or reading: top-to-bottom, left-to-right"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max texts returned (default 500)"
+     },
+     "offset": {
+      "type": "integer",
+      "description": "Skip this many (paging)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Read texts",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "list_blocks",
+   "title": "List block definitions",
+   "description": "Block definitions of the active drawing with attribute definitions, entity count, insert count, dynamic/xref flags.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Wildcard filter"
+     },
+     "include_anonymous": {
+      "type": "boolean",
+      "description": "Include anonymous *U / *D blocks (default false)"
+     },
+     "include_xrefs": {
+      "type": "boolean",
+      "description": "Include xrefs (default true)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "List block definitions",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "selection",
+   "title": "Get / set selection",
+   "description": "get: the entities the user has selected (pickfirst). set / add: select these handles in AutoCAD (grips) so the user sees them. clear: deselect.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "get",
+       "set",
+       "add",
+       "clear"
+      ],
+      "description": "get, set, add or clear"
+     },
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max entities described for get (default 200)"
+     }
+    },
+    "required": [
+     "action"
+    ]
+   },
+   "annotations": {
+    "title": "Get / set selection",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "add_entities",
+   "title": "Draw entities",
+   "description": "Create entities in one undo step (all or nothing). Each item has a type and its fields; all accept layer (created if missing), color, linetype, lineweight. Types: line {start, end}; polyline {points, closed, bulges, width}; rectangle {corner1, corner2}; circle {center, radius}; arc {center, radius, start_angle, end_angle} or {points: [p1, p2, p3]}; ellipse {center, major_axis [dx, dy], ratio}; point {position}; text {position, text, height, rotation, align (left, center, right, middle_center, top_left...), style}; mtext {position, text (\\\\n for new line), height, width, rotation, attachment (top_left...), style}; insert {block, position, scale, rotation, attributes {TAG: value}, block_file (a .dwg imported as the block when missing)}; dim_aligned {p1, p2, dim_point, text, style}; dim_linear {p1, p2, dim_point, rotation (0 horizontal, 90 vertical), text, style}; hatch {points (closed polygon) or boundary_handles, pattern (SOLID, ANSI31...), scale, angle}; spline {points}. Angles in degrees CCW; height defaults to TEXTSIZE.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "space": {
+      "type": "string",
+      "description": "model, paper, current (default) or a layout name"
+     },
+     "items": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "type": {
+         "type": "string",
+         "enum": [
+          "line",
+          "polyline",
+          "rectangle",
+          "circle",
+          "arc",
+          "ellipse",
+          "point",
+          "text",
+          "mtext",
+          "insert",
+          "dim_aligned",
+          "dim_linear",
+          "hatch",
+          "spline"
+         ]
+        }
+       },
+       "required": [
+        "type"
+       ]
+      },
+      "description": "Entities to create"
+     }
+    },
+    "required": [
+     "items"
+    ]
+   },
+   "annotations": {
+    "title": "Draw entities",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "update_entities",
+   "title": "Modify entities",
+   "description": "Change properties of entities. Either handles + set (same change for all) or items [{handle, ...props}]. Props: layer, color, linetype, lineweight, text, height, rotation, position, start, end, center, radius, closed, width, scale, attributes {TAG: value}. Props that do not apply to an entity type are reported in skipped.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "set": {
+      "type": "object",
+      "description": "Properties to apply to every handle"
+     },
+     "items": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "handle": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "handle"
+       ]
+      },
+      "description": "Per-entity changes"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Modify entities",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "delete_entities",
+   "title": "Delete entities",
+   "description": "Erase entities by handle (one undo step).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     }
+    },
+    "required": [
+     "handles"
+    ]
+   },
+   "annotations": {
+    "title": "Delete entities",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "transform_entities",
+   "title": "Move / copy / rotate / scale / mirror",
+   "description": "Transform entities by handle. operation: move {displacement [dx, dy] or from + to}; rotate {base_point, angle}; scale {base_point, factor}; mirror {mirror_line [[x1, y1], [x2, y2]]}. copy=true transforms copies and returns their handles. Mirror does not keep text readable (MIRRTEXT is not applied).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "operation": {
+      "type": "string",
+      "enum": [
+       "move",
+       "rotate",
+       "scale",
+       "mirror"
+      ],
+      "description": "Transformation"
+     },
+     "copy": {
+      "type": "boolean",
+      "description": "Transform copies instead of the originals"
+     },
+     "displacement": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "move: [dx, dy]"
+     },
+     "from": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "move: base point"
+     },
+     "to": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "move: target point"
+     },
+     "base_point": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "rotate/scale: base point"
+     },
+     "angle": {
+      "type": "number",
+      "description": "rotate: degrees CCW"
+     },
+     "factor": {
+      "type": "number",
+      "description": "scale: factor"
+     },
+     "mirror_line": {
+      "type": "array",
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "description": "mirror: two points"
+     }
+    },
+    "required": [
+     "handles",
+     "operation"
+    ]
+   },
+   "annotations": {
+    "title": "Move / copy / rotate / scale / mirror",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "create_block",
+   "title": "Make block",
+   "description": "Create a block definition from existing entities (all from the same space). mode: convert (default) replaces them with a block reference, keep leaves them, delete erases them.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "New block name"
+     },
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "base_point": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Insertion base point"
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "convert",
+       "keep",
+       "delete"
+      ],
+      "description": "convert, keep or delete"
+     },
+     "description": {
+      "type": "string",
+      "description": "Block description"
+     }
+    },
+    "required": [
+     "name",
+     "handles",
+     "base_point"
+    ]
+   },
+   "annotations": {
+    "title": "Make block",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zoom",
+   "title": "Zoom",
+   "description": "Zoom the current view: extents (everything), window {p1, p2}, handles (fit these entities), or center {center, height}.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "mode": {
+      "type": "string",
+      "enum": [
+       "extents",
+       "window",
+       "handles",
+       "center"
+      ],
+      "description": "What to zoom to"
+     },
+     "p1": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "window: first corner"
+     },
+     "p2": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "window: second corner"
+     },
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "center": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "center: view center"
+     },
+     "height": {
+      "type": "number",
+      "description": "center: view height in drawing units"
+     },
+     "margin": {
+      "type": "number",
+      "description": "Extra space around the target, as a fraction (default 0.05)"
+     }
+    },
+    "required": [
+     "mode"
+    ]
+   },
+   "annotations": {
+    "title": "Zoom",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "screenshot",
+   "title": "Screenshot",
+   "description": "PNG image of the current AutoCAD view of the active drawing, to check what was drawn. Zoom first to frame the area.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "width": {
+      "type": "integer",
+      "description": "Image width in pixels (default 1280, max 2400)"
+     },
+     "height": {
+      "type": "integer",
+      "description": "Image height in pixels (default 800, max 1600)"
+     },
+     "save_path": {
+      "type": "string",
+      "description": "Also save the PNG to this path"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Screenshot",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "run_command",
+   "title": "Run AutoCAD command",
+   "description": "Send a command line to AutoCAD as if typed, e.g. _.ZOOM _E, -LAYER _M WALL  (spaces = Enter), _.PURGE _A * _N, _.OVERKILL. Use command-line versions (-LAYER, -INSERT, -HATCH) so no dialog opens. Waits until the command finishes (or wait_seconds) and reports entities created meanwhile. Commands that repeat prompts (LINE, PLINE) need an extra Enter (two spaces) to end. A command still waiting for input when the wait ends is cancelled (Esc) unless cancel_unfinished=false, so AutoCAD is not left busy. AutoLISP expressions and commands that load code, run scripts or start programs are refused.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "command": {
+      "type": "string",
+      "description": "Command line text. Prefix with _. for English command names"
+     },
+     "wait_seconds": {
+      "type": "number",
+      "description": "Max seconds to wait for the command to finish (default 15, max 120)"
+     },
+     "cancel_unfinished": {
+      "type": "boolean",
+      "description": "Press Esc if the command is still waiting for input at the end (default true)"
+     },
+     "echo": {
+      "type": "boolean",
+      "description": "Echo on the AutoCAD command line (default true)"
+     }
+    },
+    "required": [
+     "command"
+    ]
+   },
+   "annotations": {
+    "title": "Run AutoCAD command",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "cancel_command",
+   "title": "Cancel running command",
+   "description": "Press Esc in the active drawing to cancel the running command. Use it for a command run_command left open, or when the user agrees to cancel what they are doing: other write tools refuse to run while a command is active.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   },
+   "annotations": {
+    "title": "Cancel running command",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "reload_addin",
+   "title": "Reload add-in",
+   "description": "Reload T3LabCAD.Core.dll from the bundle folder after installing a new build (scripts/install.ps1). The connection drops for a moment; call get_status after a few seconds.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   },
+   "annotations": {
+    "title": "Reload add-in",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  }
+ ]
+}

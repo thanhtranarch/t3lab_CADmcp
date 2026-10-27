@@ -1,0 +1,37 @@
+<Project>
+  <!-- Shared settings for the AutoCAD add-in projects. Override the AutoCAD
+       install folder with: dotnet build -p:AcadDir="C:\Program Files\Autodesk\AutoCAD 2023" -->
+  <PropertyGroup>
+    <AcadDir Condition="'$(AcadDir)' == ''">C:\Program Files\Autodesk\AutoCAD 2024</AcadDir>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <DebugType>full</DebugType>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Version>1.0.0</Version>
+    <Company>T3Lab</Company>
+    <Product>T3Lab CAD MCP</Product>
+    <Copyright>T3Lab</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- net48 reference assemblies, so no Visual Studio targeting pack is needed. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="accoremgd">
+      <HintPath>$(AcadDir)\accoremgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="acdbmgd">
+      <HintPath>$(AcadDir)\acdbmgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="acmgd">
+      <HintPath>$(AcadDir)\acmgd.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

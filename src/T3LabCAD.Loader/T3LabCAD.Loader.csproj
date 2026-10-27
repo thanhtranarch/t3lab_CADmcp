@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The DLL AutoCAD loads (bundle autoloader / NETLOAD). Kept small and stable:
+       AutoCAD locks it until restart, everything else lives in T3LabCAD.Core. -->
+  <PropertyGroup>
+    <AssemblyName>T3LabCAD.Loader</AssemblyName>
+    <RootNamespace>T3LabCAD.Loader</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="AdWindows">
+      <HintPath>$(AcadDir)\AdWindows.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+</Project>
