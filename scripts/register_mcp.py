@@ -4,15 +4,30 @@
 
 Reuses the interpreter of an existing t3lab-revit entry so both bridges run the
 same Python. Backs up the config before writing; no change if already correct.
+
+Claude Desktop keeps this file in memory and writes it back when it quits, so an
+entry added while it runs is lost: refuses (exit 3) while Claude.exe is running
+unless --force.
 """
 
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 
 NAME = "t3lab-autocad"
+CLAUDE_RUNNING = 3
+
+
+def claude_desktop_running():
+    try:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq claude.exe", "/NH"],
+                             capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "claude.exe" in out.lower()
 
 
 def main():
@@ -38,6 +53,10 @@ def main():
     if dry_run:
         print("Claude Desktop: would set {} = {}".format(NAME, json.dumps(entry)))
         return 0
+    if claude_desktop_running() and "--force" not in sys.argv:
+        print("Claude Desktop is running and rewrites its config when it quits, so the entry would be lost.")
+        print("Quit it (tray icon > Quit), run this again, then start Claude Desktop.")
+        return CLAUDE_RUNNING
 
     if os.path.exists(path):
         backup = path + ".bak-" + time.strftime("%Y%m%d-%H%M%S")

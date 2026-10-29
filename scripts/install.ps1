@@ -87,7 +87,8 @@ $bridgePath = ("$data\bridge.py" -replace '\\', '/')
 if (-not $NoClaudeConfig) {
     Step "Claude Desktop config"
     & $Python -I "$root\scripts\register_mcp.py" $bridgePath $Python
-    if ($LASTEXITCODE -ne 0) { throw "register_mcp.py failed" }
+    if ($LASTEXITCODE -eq 3) { Write-Warning "Claude Desktop not updated (it is running). Quit it and run: install.ps1 -SkipBuild" }
+    elseif ($LASTEXITCODE -ne 0) { throw "register_mcp.py failed" }
 }
 if ($ClaudeCode) {
     Step "Claude Code (user scope)"
