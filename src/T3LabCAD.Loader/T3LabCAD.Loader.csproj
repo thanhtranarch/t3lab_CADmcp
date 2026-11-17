@@ -6,11 +6,8 @@
     <RootNamespace>T3LabCAD.Loader</RootNamespace>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Reference Include="AdWindows">
-      <HintPath>$(AcadDir)\AdWindows.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+  <!-- AdWindows (ribbon) comes with the AutoCAD.NET package (Directory.Build.props). -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="System.Xaml" />

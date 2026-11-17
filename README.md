@@ -12,18 +12,28 @@ Claude ──stdio MCP──> bridge.py (%APPDATA%\T3LabCAD) ──TCP 127.0.0.1
 | `src/T3LabCAD.Core` | Server TCP (chỉ localhost), chạy tool trên main thread của AutoCAD, mỗi thay đổi = 1 bước Undo. |
 | `bridge/t3lab_cad_bridge.py` | MCP server stdio (chỉ dùng thư viện chuẩn Python). Kết nối được cả khi AutoCAD đóng, tự cache danh sách tool, hỗ trợ nhiều AutoCAD cùng lúc. |
 
-Hỗ trợ AutoCAD 2021–2024 (.NET Framework 4.8). Build mặc định với API AutoCAD 2024.
+Hỗ trợ **AutoCAD và Civil 3D 2022 → 2027** (và các sản phẩm dựa trên AutoCAD), một bundle cho mọi bản:
+
+| Series | AutoCAD / Civil 3D | .NET | Thư mục trong bundle |
+|---|---|---|---|
+| R24 | 2022–2024 (2021 vẫn nạp) | .NET Framework 4.8 | `Contents/R24` |
+| R25 | 2025–2026 | .NET 8 | `Contents/R25` |
+| R26 | 2027 | .NET 10 | `Contents/R26` |
+
+API AutoCAD lấy từ gói NuGet `AutoCAD.NET` của Autodesk, nên build được mọi series mà không cần cài AutoCAD.
 
 ## Cài đặt
 
-Cần: AutoCAD 2021–2024, .NET SDK 8+ (để build), Python 3.
+**Cách dễ nhất:** trong Revit, T3Lab › MCP Control › Connect › chọn AutoCAD (hoặc Civil 3D) › **Connect**. MCP Control tải `T3LabCAD.zip` từ bản phát hành mới nhất trên GitHub, cài bundle + bridge, rồi kết nối AI app. Khởi động lại AutoCAD sau lần cài đầu.
+
+**Từ mã nguồn** — cần .NET SDK 10 (build cả 3 series), Python 3:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 ```
 
 Script sẽ:
-1. Build 2 project (`-AcadDir` để chọn bản AutoCAD khác).
+1. Build 2 project cho từng series R24, R25, R26 (`-Series R26` để chỉ build một series).
 2. Copy bundle vào `%APPDATA%\Autodesk\ApplicationPlugins\T3LabCAD.bundle` (vị trí trusted, AutoCAD tự load khi khởi động).
 3. Copy bridge vào `%APPDATA%\T3LabCAD\bridge.py`.
 4. Thêm server `t3lab-autocad` vào `claude_desktop_config.json` (có backup). Thêm `-ClaudeCode` để đăng ký cho Claude Code CLI (`claude mcp add --scope user`).
@@ -78,3 +88,7 @@ python -I tests/smoke_live.py
 `smoke_bridge.py` chạy không cần AutoCAD (dùng `tests/mock_autocad.py`). `smoke_live.py` cần AutoCAD đang chạy: chỉ đọc trên bản vẽ đang mở, mọi thao tác ghi làm trên một bản vẽ mới rồi đóng không lưu.
 
 Log: `%APPDATA%\T3LabCAD\logs\t3labcad.log`.
+
+## Phát hành
+
+`.github/workflows/release.yml` build 3 series trên Ubuntu, chạy `python scripts/package.py` và đưa `T3LabCAD.zip` lên GitHub Release `v<Version>` (`src/Directory.Build.props`). Chạy khi push tag `v*` hoặc bấm **Run workflow** (Actions › Release). MCP Control trong T3Lab tải bản mới nhất từ `releases/latest/download/T3LabCAD.zip`.
