@@ -1,0 +1,51 @@
+name: Release
+
+# Builds the add-in for every AutoCAD series (R24 2022-2024 / R25 2025-2026 / R26 2027) and
+# publishes dist/T3LabCAD.zip, which T3Lab's MCP Control installs on Connect.
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build R24 / R25 / R26
+        run: |
+          for s in R24 R25 R26; do
+            for p in T3LabCAD.Core T3LabCAD.Loader; do
+              dotnet build "src/$p/$p.csproj" -c Release -nologo -v q -p:AcadSeries=$s
+            done
+          done
+      - name: Package
+        run: python3 scripts/package.py
+      - name: Bridge smoke test (no AutoCAD)
+        run: python3 -I tests/smoke_bridge.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: T3LabCAD
+          path: dist/T3LabCAD.zip
+      - name: GitHub Release
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/Directory.Build.props)
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/T3LabCAD.zip --clobber
+          else
+            gh release create "$tag" dist/T3LabCAD.zip --target "$GITHUB_SHA" \
+              --title "T3LabCAD $version" \
+              --notes "AutoCAD / Civil 3D 2022-2027 (R24, R25, R26). Installed by T3Lab MCP Control (Connect), or unzip: T3LabCAD.bundle -> %APPDATA%\\Autodesk\\ApplicationPlugins, T3LabCAD -> %APPDATA%."
+          fi
