@@ -91,4 +91,4 @@ Log: `%APPDATA%\T3LabCAD\logs\t3labcad.log`.
 
 ## Phát hành
 
-`.github/workflows/release.yml` build 3 series trên Ubuntu, chạy `python scripts/package.py` và đưa `T3LabCAD.zip` lên GitHub Release `v<Version>` (`src/Directory.Build.props`). Chạy khi push tag `v*` hoặc bấm **Run workflow** (Actions › Release). MCP Control trong T3Lab tải bản mới nhất từ `releases/latest/download/T3LabCAD.zip`.
+`.github/workflows/release.yml` build 3 series trên Ubuntu, chạy `python scripts/package.py` và đưa `T3LabCAD.zip` lên GitHub Release `v<Version>` (`src/Directory.Build.props`). Chạy mỗi khi merge vào `main`, khi push tag `v*`, hoặc bấm **Run workflow** (Actions › Release). Cùng version thì file zip được thay; đổi `<Version>` để ra release mới. MCP Control trong T3Lab tải bản mới nhất từ `releases/latest/download/T3LabCAD.zip`.
