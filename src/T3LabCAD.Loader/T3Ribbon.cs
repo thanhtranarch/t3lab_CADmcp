@@ -1,5 +1,5 @@
 using System;
-using System.Globalization;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -37,58 +37,120 @@ namespace T3LabCAD.Loader
             if (!_hooked)
             {
                 _hooked = true;
-                // Switching workspace rebuilds the ribbon and drops custom tabs.
                 AcApp.SystemVariableChanged += (s, e) =>
                 {
+                    // Switching workspace rebuilds the ribbon and drops custom tabs.
                     if (string.Equals(e.Name, "WSCURRENT", StringComparison.OrdinalIgnoreCase)) Build();
+                    else if (string.Equals(e.Name, "COLORTHEME", StringComparison.OrdinalIgnoreCase)) Repaint();
                 };
             }
 
             RibbonControl ribbon = ComponentManager.Ribbon;
             if (ribbon == null || ribbon.FindTab(TabId) != null) return;
 
+            Buttons.Clear();
             var source = new RibbonPanelSource { Title = "MCP Server" };
-            source.Items.Add(Button("Start", "T3MCPSTART", "Start the MCP server so Claude can connect", Color.FromRgb(0x2E, 0x7D, 0x32), "▶"));
-            source.Items.Add(Button("Stop", "T3MCPSTOP", "Stop the MCP server", Color.FromRgb(0xC6, 0x28, 0x28), "■"));
-            source.Items.Add(Button("Status", "T3MCPSTATUS", "Show port, tool count and last call", Color.FromRgb(0x15, 0x65, 0xC0), "i"));
-            source.Items.Add(Button("Reload", "T3MCPRELOAD", "Reload T3LabCAD.Core.dll after installing a new build", Color.FromRgb(0x5E, 0x35, 0xB1), "↻"));
+            source.Items.Add(Button("Start", "T3MCPSTART", "Start the MCP server so Claude can connect", "start"));
+            source.Items.Add(Button("Stop", "T3MCPSTOP", "Stop the MCP server", "stop"));
+            source.Items.Add(Button("Status", "T3MCPSTATUS", "Show port, tool count and last call", "status"));
+            source.Items.Add(Button("Reload", "T3MCPRELOAD", "Reload T3LabCAD.Core.dll after installing a new build", "reload"));
 
             var tab = new RibbonTab { Title = "T3Lab", Id = TabId };
             tab.Panels.Add(new RibbonPanel { Source = source });
             ribbon.Tabs.Add(tab);
         }
 
-        static RibbonButton Button(string text, string command, string tip, Color color, string glyph)
+        static readonly List<KeyValuePair<RibbonButton, string>> Buttons = new List<KeyValuePair<RibbonButton, string>>();
+
+        static RibbonButton Button(string text, string command, string tip, string icon)
         {
-            return new RibbonButton
+            bool dark = IsDarkTheme();
+            var button = new RibbonButton
             {
                 Text = text,
                 ShowText = true,
                 ShowImage = true,
                 Size = RibbonItemSize.Large,
                 Orientation = System.Windows.Controls.Orientation.Vertical,
-                LargeImage = Icon(glyph, color, 32),
-                Image = Icon(glyph, color, 16),
+                LargeImage = Icon(icon, 32, dark),
+                Image = Icon(icon, 16, dark),
                 ToolTip = tip,
                 CommandParameter = command,
                 CommandHandler = new SendCommand(),
             };
+            Buttons.Add(new KeyValuePair<RibbonButton, string>(button, icon));
+            return button;
         }
 
-        static ImageSource Icon(string glyph, Color color, int size)
+        static void Repaint()
         {
+            bool dark = IsDarkTheme();
+            foreach (var item in Buttons)
+            {
+                item.Key.LargeImage = Icon(item.Value, 32, dark);
+                item.Key.Image = Icon(item.Value, 16, dark);
+            }
+        }
+
+        static bool IsDarkTheme()
+        {
+            try { return Convert.ToInt32(AcApp.GetSystemVariable("COLORTHEME")) == 0; }
+            catch { return true; }   // AutoCAD's default theme is dark
+        }
+
+        // Icon family (T3Lab style: round 2-unit strokes on a 32 grid, one orange accent): every button is
+        // the MCP server (two rack units) with an orange badge saying what the button does.
+        static readonly string[] Server =
+        {
+            "M6,4 H20 Q22,4 22,6 V10 Q22,12 20,12 H6 Q4,12 4,10 V6 Q4,4 6,4 Z",
+            "M6,15 H20 Q22,15 22,17 V21 Q22,23 20,23 H6 Q4,23 4,21 V17 Q4,15 6,15 Z",
+        };
+        static readonly string[] ServerDetail = { "M12,8 H17", "M12,19 H17" };
+        static readonly string[] ServerLeds = { "M8,8 L8,8.01", "M8,19 L8,19.01" };
+        static readonly Dictionary<string, string> Badge = new Dictionary<string, string>
+        {
+            ["start"] = "M22.6,20.8 L27.4,24 L22.6,27.2 Z",
+            ["stop"] = "M21.8,21.8 H26.2 V26.2 H21.8 Z",
+            ["status"] = "M19.8,24 H21.4 L22.7,21.2 L25.3,26.8 L26.6,24 H28.2",
+            ["reload"] = "M27.6,24 A3.6,3.6 0 1 1 26.4,21.3 M27,19.4 V21.6 H24.8",
+        };
+
+        /// <summary>Icon of `size` device-independent pixels, rendered at 2x so it stays sharp on high-DPI screens.</summary>
+        static ImageSource Icon(string name, int size, bool dark)
+        {
+            Color ink = dark ? Color.FromRgb(0xF2, 0xF2, 0xF2) : Color.FromRgb(0x1A, 0x1A, 0x1A);
+            Color ink2 = dark ? Color.FromRgb(0xA3, 0xA3, 0xA3) : Color.FromRgb(0x66, 0x66, 0x66);
+            Color signal = dark ? Color.FromRgb(0xF2, 0x75, 0x22) : Color.FromRgb(0xEA, 0x68, 0x0C);
+            const int scale = 2;
             var visual = new DrawingVisual();
             using (DrawingContext dc = visual.RenderOpen())
             {
-                dc.DrawRoundedRectangle(new SolidColorBrush(color), null, new Rect(1, 1, size - 2, size - 2), size * 0.22, size * 0.22);
-                var text = new FormattedText(glyph, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                    new Typeface("Segoe UI Symbol"), size * 0.55, Brushes.White, 1.0);
-                dc.DrawText(text, new Point((size - text.Width) / 2, (size - text.Height) / 2));
+                dc.PushTransform(new ScaleTransform(size * scale / 32.0, size * scale / 32.0));
+                // The server is cut back around the badge so the two never touch.
+                dc.PushClip(new CombinedGeometry(GeometryCombineMode.Exclude,
+                    new RectangleGeometry(new Rect(0, 0, 32, 32)), new EllipseGeometry(new Point(24, 24), 8.8, 8.8)));
+                foreach (string d in Server) Stroke(dc, d, ink, 2.0);
+                foreach (string d in ServerDetail) Stroke(dc, d, ink2, 2.0);
+                foreach (string d in ServerLeds) Stroke(dc, d, ink2, 3.0);
+                dc.Pop();
+                var fill = new SolidColorBrush(signal);
+                dc.DrawEllipse(fill, new Pen(fill, 2.0), new Point(24, 24), 6.5, 6.5);
+                Stroke(dc, Badge[name], Colors.White, 1.8);
+                dc.Pop();
             }
-            var bmp = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
+            var bmp = new RenderTargetBitmap(size * scale, size * scale, 96 * scale, 96 * scale, PixelFormats.Pbgra32);
             bmp.Render(visual);
             bmp.Freeze();
             return bmp;
+        }
+
+        static void Stroke(DrawingContext dc, string path, Color color, double width)
+        {
+            var pen = new Pen(new SolidColorBrush(color), width)
+            {
+                StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round,
+            };
+            dc.DrawGeometry(null, pen, Geometry.Parse(path));
         }
 
         /// <summary>Ribbon buttons run their command through the command line (cancelling whatever is active).</summary>
