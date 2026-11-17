@@ -1,6 +1,4 @@
-# T3Lab CAD MCP — add-in AutoCAD và 3ds Max cho Claude
-
-Hai add-in, một bridge: **T3LabCAD** (AutoCAD / Civil 3D 2022–2027) và **T3LabMax** (3ds Max 2022–2027, xem [mục 3ds Max](#3ds-max--t3labmax)).
+# T3Lab CAD MCP — add-in AutoCAD cho Claude
 
 Add-in AutoCAD (giống T3Lab Revit MCP) cho phép Claude Desktop / Claude Code đọc và chỉnh **bản vẽ đang mở trong AutoCAD**: truy vấn đối tượng, đọc text, layer, block, vẽ, sửa, di chuyển, zoom, chụp màn hình, chạy lệnh AutoCAD.
 
@@ -91,32 +89,6 @@ python -I tests/smoke_live.py
 
 Log: `%APPDATA%\T3LabCAD\logs\t3labcad.log`.
 
-## 3ds Max — T3LabMax
-
-```
-Claude ──stdio MCP──> bridge.py (%APPDATA%\T3LabMax) ──TCP 127.0.0.1:48910-48918──> t3lab_max_mcp.py trong 3ds Max
-```
-
-| Phần | Vai trò |
-|---|---|
-| `src/T3LabMax/t3lab_max_mcp.py` | Server TCP (chỉ localhost) viết bằng Python + `pymxs`, chạy được từ 3ds Max 2022 (Python 3.7) tới 2027. Socket thread chỉ trả `health` / `tools/list`; `tools/call` xếp hàng và chạy trên main thread qua một Qt timer 25 ms (PySide2 cho 2022–2024, PySide6 cho 2025+). Mỗi tool ghi = 1 bước Undo `T3Lab MCP: <tool>`. |
-| `src/T3LabMax/t3lab_max_mcp_start.ms` | Script khởi động: thêm thư mục vào `sys.path`, chạy server. MAXScript Listener: `T3MCPStatus()`, `T3MCPStart()`, `T3MCPStop()`. |
-| `bundle_max/PackageContents.xml` | Package 3ds Max (`post-start-up scripts parts`, `SeriesMin 2022` – `SeriesMax 2027`). Không có phần compiled nên một bundle cho mọi bản. |
-| `bridge/t3lab_cad_bridge.py` | Cùng bridge với AutoCAD: deploy vào `%APPDATA%\T3LabMax\bridge.py` thì tự chọn profile 3ds Max (server `t3lab-3dsmax`, pin `max_port`). Env `T3LAB_BRIDGE_APP=T3LabMax` để ép profile. |
-
-**Cài:** T3Lab › MCP Control › Connect › 3ds Max › **Connect** (tải `T3LabMax.zip`, cài bundle vào `%APPDATA%\Autodesk\ApplicationPlugins\T3LabMax.bundle` và bridge vào `%APPDATA%\T3LabMax`). Khởi động lại 3ds Max sau lần cài đầu. Cài tay: giải nén zip, `T3LabMax.bundle` → `%APPDATA%\Autodesk\ApplicationPlugins`, `T3LabMax` → `%APPDATA%`.
-
-| Nhóm | Tool |
-|---|---|
-| Trạng thái | `get_status` |
-| Đọc | `list_objects` (lọc theo tên, class, layer, selection; `detail=count/bbox`; phân trang), `get_object`, `list_layers`, `list_materials` |
-| Chọn / xem | `select_objects`, `zoom_extents`, `viewport_screenshot` (ảnh PNG) |
-| Tạo / sửa | `create_objects` (Box, Sphere, Cylinder, Plane, Text, …), `transform_objects`, `set_properties`, `assign_material` (Physical / Standard), `delete_objects`, `undo_last` |
-| MAXScript | `run_maxscript` — từ chối DOSCommand, ShellLaunch, deleteFile, python.Execute, saveMaxFile, resetMaxFile, quitMax… |
-| Bridge | `list_3dsmax_instances`, `switch_3dsmax_instance` |
-
-Test (không cần 3ds Max, dùng pymxs giả): `python -I tests/test_max_server.py`. **Chưa test trong 3ds Max thật.**
-
 ## Phát hành
 
-`.github/workflows/release.yml` build 3 series trên Ubuntu, chạy `python scripts/package.py` (ra `T3LabCAD.zip` và `T3LabMax.zip`) và đưa cả hai lên GitHub Release `v<Version>` (`src/Directory.Build.props`). Chạy khi push tag `v*` hoặc bấm **Run workflow** (Actions › Release). MCP Control trong T3Lab tải bản mới nhất từ `releases/latest/download/T3LabCAD.zip` / `T3LabMax.zip`.
+`.github/workflows/release.yml` build 3 series trên Ubuntu, chạy `python scripts/package.py` và đưa `T3LabCAD.zip` lên GitHub Release `v<Version>` (`src/Directory.Build.props`). Chạy khi push tag `v*` hoặc bấm **Run workflow** (Actions › Release). MCP Control trong T3Lab tải bản mới nhất từ `releases/latest/download/T3LabCAD.zip`.

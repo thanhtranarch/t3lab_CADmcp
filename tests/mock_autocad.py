@@ -1,6 +1,6 @@
-"""Stand-in for a T3Lab add-in: speaks the same line-JSON protocol on one port.
+"""Stand-in for the T3LabCAD add-in: speaks the same line-JSON protocol on one port.
 
-    python -I tests/mock_autocad.py 49900 [T3LabCAD|T3LabMax]
+    python -I tests/mock_autocad.py 49900
 
 Tools: get_status (echo), fail (isError result). Used by tests/smoke_bridge.py.
 """
@@ -25,7 +25,7 @@ class Handler(socketserver.StreamRequestHandler):
                 return
             method, params = req.get("method"), req.get("params") or {}
             if method == "health":
-                result = {"app": self.server.app, "version": "mock", "pid": os.getpid(), "port": self.server.server_address[1],
+                result = {"app": "T3LabCAD", "version": "mock", "pid": os.getpid(), "port": self.server.server_address[1],
                           "autocad": "mock", "active_document": "mock.dwg", "calls": 0}
             elif method == "tools/list":
                 result = {"tools": TOOLS}
@@ -45,6 +45,5 @@ if __name__ == "__main__":
     port = int(sys.argv[1])
     with socketserver.ThreadingTCPServer(("127.0.0.1", port), Handler) as server:
         server.daemon_threads = True
-        server.app = sys.argv[2] if len(sys.argv) > 2 else "T3LabCAD"
         print("mock on", port, flush=True)
         server.serve_forever()

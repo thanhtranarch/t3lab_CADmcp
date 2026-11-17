@@ -1,8 +1,7 @@
 name: Release
 
-# Builds the AutoCAD add-in for every series (R24 2022-2024 / R25 2025-2026 / R26 2027) and the
-# 3ds Max 2022-2027 add-in, and publishes dist/T3LabCAD.zip + dist/T3LabMax.zip, which T3Lab's
-# MCP Control installs on Connect.
+# Builds the add-in for every AutoCAD series (R24 2022-2024 / R25 2025-2026 / R26 2027) and
+# publishes dist/T3LabCAD.zip, which T3Lab's MCP Control installs on Connect.
 on:
   push:
     tags: ["v*"]
@@ -30,16 +29,12 @@ jobs:
           done
       - name: Package
         run: python3 scripts/package.py
-      - name: Bridge smoke test (no AutoCAD / 3ds Max)
+      - name: Bridge smoke test (no AutoCAD)
         run: python3 -I tests/smoke_bridge.py
-      - name: 3ds Max server test (fake pymxs)
-        run: python3 -I tests/test_max_server.py
       - uses: actions/upload-artifact@v4
         with:
-          name: T3Lab-addins
-          path: |
-            dist/T3LabCAD.zip
-            dist/T3LabMax.zip
+          name: T3LabCAD
+          path: dist/T3LabCAD.zip
       - name: GitHub Release
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         env:
@@ -48,9 +43,9 @@ jobs:
           version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/Directory.Build.props)
           tag="v$version"
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" dist/T3LabCAD.zip dist/T3LabMax.zip --clobber
+            gh release upload "$tag" dist/T3LabCAD.zip --clobber
           else
-            gh release create "$tag" dist/T3LabCAD.zip dist/T3LabMax.zip --target "$GITHUB_SHA" \
-              --title "T3Lab add-ins $version" \
-              --notes "T3LabCAD: AutoCAD / Civil 3D 2022-2027 (R24, R25, R26). T3LabMax: 3ds Max 2022-2027. Installed by T3Lab MCP Control (Connect), or unzip: <Name>.bundle -> %APPDATA%\\Autodesk\\ApplicationPlugins, <Name> -> %APPDATA%."
+            gh release create "$tag" dist/T3LabCAD.zip --target "$GITHUB_SHA" \
+              --title "T3LabCAD $version" \
+              --notes "AutoCAD / Civil 3D 2022-2027 (R24, R25, R26). Installed by T3Lab MCP Control (Connect), or unzip: T3LabCAD.bundle -> %APPDATA%\\Autodesk\\ApplicationPlugins, T3LabCAD -> %APPDATA%."
           fi
