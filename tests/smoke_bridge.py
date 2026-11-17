@@ -5,7 +5,9 @@
 1. AutoCAD down: initialize/ping work, tools/list falls back, a call returns the "not reachable" error.
 2. Mock add-in up: live tools/list, a forwarded call (pin stripped), isError passthrough, result capping,
    list_autocad_instances.
-Uses ports 49900-49902 and a temporary APPDATA so the real cache is not touched.
+3. 3ds Max profile (T3LAB_BRIDGE_APP=T3LabMax): own server name and tools, ignores a T3LabCAD add-in
+   on its ports, max_port pin stripped.
+Uses ports 49900-49902 / 49910-49912 and a temporary APPDATA so the real cache is not touched.
 """
 
 import json
@@ -96,6 +98,32 @@ def main():
         c.close()
     finally:
         mock.terminate()
+
+    # 3. 3ds Max profile
+    env_max = dict(os.environ, T3LAB_BRIDGE_APP="T3LabMax", T3LABMAX_PORT_RANGE="49910-49912", APPDATA=appdata)
+    mocks = [subprocess.Popen([sys.executable, "-I", MOCK, str(port), app], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL) for port, app in ((49910, "T3LabCAD"), (49911, "T3LabMax"))]
+    for m in mocks:
+        m.stdout.readline()
+    try:
+        c = Client(env_max)
+        r = c.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        check("max: initialize", r["result"]["serverInfo"]["name"] == "t3lab-3dsmax"
+              and "3ds Max" in r["result"]["instructions"], r)
+        tools = [t["name"] for t in c.request("tools/list")["result"]["tools"]]
+        check("max: local tools", "list_3dsmax_instances" in tools and "list_autocad_instances" not in tools, tools)
+        r = c.request("tools/call", {"name": "list_3dsmax_instances", "arguments": {}})["result"]
+        inst = json.loads(r["content"][0]["text"])["instances"]
+        check("max: only T3LabMax instances", [i["port"] for i in inst] == [49911], inst)
+        r = c.request("tools/call", {"name": "get_status", "arguments": {"a": 2, "max_port": 49911}})["result"]
+        check("max: pin stripped", json.loads(r["content"][0]["text"])["echo"] == {"a": 2}, r)
+        r = c.request("tools/call", {"name": "get_status", "arguments": {"max_port": 49910}})["result"]
+        check("max: pinned to a CAD add-in -> not run", r.get("isError") is True, r)
+        check("max: cache in T3LabMax", os.path.exists(os.path.join(appdata, "T3LabMax", "tools_cache.json")))
+        c.close()
+    finally:
+        for m in mocks:
+            m.terminate()
 
     print("\n{} failure(s)".format(check.failed))
     sys.exit(1 if check.failed else 0)
