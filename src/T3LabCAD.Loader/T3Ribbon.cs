@@ -114,18 +114,28 @@ namespace T3LabCAD.Loader
             ["status"] = "M19.8,24 H21.4 L22.7,21.2 L25.3,26.8 L26.6,24 H28.2",
             ["reload"] = "M27.6,24 A3.6,3.6 0 1 1 26.4,21.3 M27,19.4 V21.6 H24.8",
         };
+        // Play / stop read as media glyphs only when solid; drawn hollow they looked like "D" and "o".
+        static readonly HashSet<string> SolidBadge = new HashSet<string> { "start", "stop" };
 
-        /// <summary>Icon of `size` device-independent pixels, rendered at 2x so it stays sharp on high-DPI screens.</summary>
+        /// <summary>Icon of `size` x `size` pixels at 96 DPI.</summary>
+        /// <remarks>AutoCAD's ribbon shows a bitmap at its pixel size and ignores its DPI: a 64 px image at
+        /// 192 DPI showed only its top-left quarter (one rack, no badge). So the bitmap is exactly the
+        /// ribbon slot (32 large / 16 small) and AutoCAD scales it on high-DPI screens like any other icon.</remarks>
         static ImageSource Icon(string name, int size, bool dark)
         {
             Color ink = dark ? Color.FromRgb(0xF2, 0xF2, 0xF2) : Color.FromRgb(0x1A, 0x1A, 0x1A);
             Color ink2 = dark ? Color.FromRgb(0xA3, 0xA3, 0xA3) : Color.FromRgb(0x66, 0x66, 0x66);
             Color signal = dark ? Color.FromRgb(0xF2, 0x75, 0x22) : Color.FromRgb(0xEA, 0x68, 0x0C);
-            const int scale = 2;
             var visual = new DrawingVisual();
             using (DrawingContext dc = visual.RenderOpen())
             {
-                dc.PushTransform(new ScaleTransform(size * scale / 32.0, size * scale / 32.0));
+                // At 16 px a 2-unit stroke is 1 px wide and centred on a pixel edge (blurred over 2 px);
+                // moving up-left half a pixel lands it on whole pixels, and the badge still fits inside 16 px.
+                double nudge = size < 32 ? -0.5 : 0.0;
+                var transform = new TransformGroup();
+                transform.Children.Add(new ScaleTransform(size / 32.0, size / 32.0));
+                transform.Children.Add(new TranslateTransform(nudge, nudge));
+                dc.PushTransform(transform);
                 // The server is cut back around the badge so the two never touch.
                 dc.PushClip(new CombinedGeometry(GeometryCombineMode.Exclude,
                     new RectangleGeometry(new Rect(0, 0, 32, 32)), new EllipseGeometry(new Point(24, 24), 8.8, 8.8)));
@@ -135,22 +145,23 @@ namespace T3LabCAD.Loader
                 dc.Pop();
                 var fill = new SolidColorBrush(signal);
                 dc.DrawEllipse(fill, new Pen(fill, 2.0), new Point(24, 24), 6.5, 6.5);
-                Stroke(dc, Badge[name], Colors.White, 1.8);
+                Stroke(dc, Badge[name], Colors.White, 1.8, SolidBadge.Contains(name));
                 dc.Pop();
             }
-            var bmp = new RenderTargetBitmap(size * scale, size * scale, 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            var bmp = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
             bmp.Render(visual);
             bmp.Freeze();
             return bmp;
         }
 
-        static void Stroke(DrawingContext dc, string path, Color color, double width)
+        static void Stroke(DrawingContext dc, string path, Color color, double width, bool fill = false)
         {
-            var pen = new Pen(new SolidColorBrush(color), width)
+            var brush = new SolidColorBrush(color);
+            var pen = new Pen(brush, width)
             {
                 StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round,
             };
-            dc.DrawGeometry(null, pen, Geometry.Parse(path));
+            dc.DrawGeometry(fill ? brush : null, pen, Geometry.Parse(path));
         }
 
         /// <summary>Ribbon buttons run their command through the command line (cancelling whatever is active).</summary>
