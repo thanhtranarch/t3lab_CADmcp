@@ -42,6 +42,8 @@ namespace T3LabCAD.Core
         public bool Background;
         /// <summary>Runs even while a command is active (cancel_command, reload_addin).</summary>
         public bool DuringCommand;
+        /// <summary>A Read tool that can also write a file (CSV export): not advertised as read-only.</summary>
+        public bool WritesFiles;
     }
 
     /// <summary>Tool result rendered as an MCP image block plus a JSON text block.</summary>
@@ -69,15 +71,19 @@ namespace T3LabCAD.Core
             LayerTools.Register();
             StyleTools.Register();
             NamedObjectTools.Register();
+            ImportTools.Register();
             QueryTools.Register();
+            MeasureTools.Register();
             EditTools.Register();
+            ModifyTools.Register();
             XrefTools.Register();
             ViewTools.Register();
             CommandTools.Register();
         }
 
         public static void Add(string name, string title, ToolKind kind, string description, string schema, ToolHandler handler,
-            bool needsDocument = true, bool tx = true, bool destructive = false, bool background = false, bool duringCommand = false)
+            bool needsDocument = true, bool tx = true, bool destructive = false, bool background = false, bool duringCommand = false,
+            bool writesFiles = false)
         {
             _tools[name] = new ToolDef
             {
@@ -92,6 +98,7 @@ namespace T3LabCAD.Core
                 Destructive = destructive,
                 Background = background,
                 DuringCommand = duringCommand,
+                WritesFiles = writesFiles,
             };
         }
 
@@ -108,7 +115,7 @@ namespace T3LabCAD.Core
                 ["annotations"] = new Dictionary<string, object>
                 {
                     ["title"] = t.Title,
-                    ["readOnlyHint"] = t.Kind == ToolKind.Read,
+                    ["readOnlyHint"] = t.Kind == ToolKind.Read && !t.WritesFiles,
                     ["destructiveHint"] = t.Destructive,
                     ["openWorldHint"] = false,
                 },

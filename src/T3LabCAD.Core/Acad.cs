@@ -82,6 +82,20 @@ namespace T3LabCAD.Core
             throw new ToolError($"Unknown space '{space}'. Use model, paper, current or a layout name (see list_layouts).");
         }
 
+        /// <summary>One space, or every layout (model + paper) for "all".</summary>
+        public static List<ObjectId> SpaceIds(Database db, Transaction tr, string space)
+        {
+            if (!string.Equals(space?.Trim(), "all", StringComparison.OrdinalIgnoreCase)) return new List<ObjectId> { SpaceId(db, tr, space) };
+            var ids = new List<KeyValuePair<int, ObjectId>>();
+            foreach (DBDictionaryEntry entry in (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead))
+            {
+                var layout = (Layout)tr.GetObject(entry.Value, OpenMode.ForRead);
+                ids.Add(new KeyValuePair<int, ObjectId>(layout.TabOrder, layout.BlockTableRecordId));
+            }
+            ids.Sort((x, y) => x.Key.CompareTo(y.Key));
+            return ids.ConvertAll(kv => kv.Value);
+        }
+
         public static string SpaceName(Transaction tr, ObjectId spaceId)
         {
             var btr = (BlockTableRecord)tr.GetObject(spaceId, OpenMode.ForRead);
