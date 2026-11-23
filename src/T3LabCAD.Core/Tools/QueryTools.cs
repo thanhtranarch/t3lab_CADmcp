@@ -17,12 +17,17 @@ namespace T3LabCAD.Core
                 "Find entities in a space (or by handle) with filters, and get their geometry. Returns total_matched, " +
                 "counts_by_type / counts_by_layer and one page of entities (limit/offset). Types are DXF names: LINE, LWPOLYLINE, " +
                 "CIRCLE, ARC, TEXT, MTEXT, INSERT (block reference), DIMENSION, HATCH, POINT, SPLINE, ELLIPSE, MULTILEADER, VIEWPORT... " +
-                "Use detail=count to only count, full for color/linetype/bbox/all vertices.",
+                "Use detail=count to only count, full for color/linetype/bbox/all vertices/length/area/table cells. " +
+                "totals=true adds total_length / total_area of the matches.",
                 Obj(Space,
                     P("types", Strs("DXF type names, wildcards allowed")),
                     P("layers", Strs("Layer names, wildcards allowed")),
                     P("block_names", Strs("For INSERT: block names (dynamic blocks by their visible name), wildcards allowed")),
                     P("text_contains", Str("Keep entities whose text, attribute values or block name contain this (case-insensitive)")),
+                    P("colors", Arr("Keep these colors: ACI number, ByLayer, ByBlock, name or #RRGGBB", "{}")),
+                    P("linetypes", Strs("Keep these linetypes (as set on the entity, e.g. ByLayer, DASHED), wildcards allowed")),
+                    P("closed", Bool("Keep only closed (true) or open (false) curves")),
+                    P("totals", Bool("Also sum length and area of the matched entities (default false)")),
                     P("window", Pts("[[x1, y1], [x2, y2]] rectangle in WCS")),
                     P("window_mode", Enum("intersect (default): bounding box overlaps the window; inside: fully inside", "intersect", "inside")),
                     Handles,
@@ -71,6 +76,14 @@ namespace T3LabCAD.Core
             string contains = a.Str("text_contains");
             Extents3d? window = a.Has("window") ? Window(a.Raw("window")) : (Extents3d?)null;
             bool inside = string.Equals(a.Str("window_mode"), "inside", StringComparison.OrdinalIgnoreCase);
+            var colors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (a.Has("colors"))
+                foreach (object raw in a.List("colors")) colors.Add(Convert.ToString(Acad.ColorOf(Acad.ParseColor(raw))));
+            List<string> linetypes = a.Strs("linetypes");
+            bool? closed = a.Has("closed") ? a.Bool("closed", true) : (bool?)null;
+            bool totals = a.Bool("totals", false);
+            double totalLength = 0, totalArea = 0;
+            int measured = 0;
 
             IEnumerable<ObjectId> source;
             string spaceName;
@@ -107,8 +120,17 @@ namespace T3LabCAD.Core
                 if (blocks.Count > 0 && !(e is BlockReference br && Wild.Any(Acad.EffectiveName(br, tr), blocks))) continue;
                 if (contains != null && Acad.TextOf(e, tr).IndexOf(contains, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 if (window.HasValue && !Hit(e, window.Value, inside)) continue;
+                if (colors.Count > 0 && !colors.Contains(Convert.ToString(Acad.ColorOf(e.Color)))) continue;
+                if (linetypes.Count > 0 && !Wild.Any(e.Linetype, linetypes)) continue;
+                if (closed.HasValue && !(e is Curve curve && curve.Closed == closed.Value)) continue;
 
                 matched++;
+                if (totals)
+                {
+                    double? length = Metrics.Length(e), area = Metrics.Area(e);
+                    if (length.HasValue) { totalLength += length.Value; measured++; }
+                    if (area.HasValue) totalArea += area.Value;
+                }
                 byType[dxf] = byType.TryGetValue(dxf, out int nt) ? nt + 1 : 1;
                 byLayer[e.Layer] = byLayer.TryGetValue(e.Layer, out int nl) ? nl + 1 : 1;
                 if (!countOnly && matched > offset && items.Count < limit) items.Add(Describe.Entity(e, tr, full));
@@ -122,6 +144,12 @@ namespace T3LabCAD.Core
                 ["counts_by_layer"] = byLayer.OrderByDescending(kv => kv.Value).Take(60).ToDictionary(kv => kv.Key, kv => (object)kv.Value),
             };
             if (byLayer.Count > 60) result["layers_not_listed"] = byLayer.Count - 60;
+            if (totals)
+            {
+                result["total_length"] = Geo.R(totalLength);
+                result["total_area"] = Geo.R(totalArea);
+                result["measured_entities"] = measured;
+            }
             if (!countOnly)
             {
                 result["offset"] = offset;
@@ -187,14 +215,15 @@ namespace T3LabCAD.Core
                     case MText m:
                         Add(TextItem(m.Handle, "MTEXT", m.Layer, m.Text, m.Location, m.TextHeight), m.Location);
                         break;
-                    case MLeader ml when ml.ContentType == ContentType.MTextContent && ml.MText != null:
-                        Add(TextItem(ml.Handle, "MULTILEADER", ml.Layer, ml.MText.Text, ml.MText.Location, ml.MText.TextHeight), ml.MText.Location);
+                    case MLeader ml when ml.ContentType == ContentType.MTextContent:
+                        using (MText copy = ml.MText) // a new copy on every read
+                            if (copy != null) Add(TextItem(ml.Handle, "MULTILEADER", ml.Layer, copy.Text, copy.Location, copy.TextHeight), copy.Location);
                         break;
                     case BlockReference br:
                         string block = null;
                         foreach (ObjectId aid in br.AttributeCollection)
                         {
-                            if (!(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar)) continue;
+                            if (aid.IsErased || !(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar)) continue;
                             block = block ?? Acad.EffectiveName(br, tr);
                             Point3d at = Acad.TextPoint(ar);
                             var item = TextItem(ar.Handle, "ATTRIB", ar.Layer, ar.TextString, at, ar.Height);

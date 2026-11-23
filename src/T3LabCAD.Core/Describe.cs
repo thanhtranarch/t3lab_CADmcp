@@ -67,6 +67,11 @@ namespace T3LabCAD.Core
                 case Circle c:
                     d["center"] = P(c.Center);
                     d["radius"] = R(c.Radius);
+                    if (full)
+                    {
+                        d["length"] = R(2 * Math.PI * c.Radius);
+                        d["area"] = R(Math.PI * c.Radius * c.Radius);
+                    }
                     break;
 
                 case Arc a:
@@ -81,6 +86,7 @@ namespace T3LabCAD.Core
                     d["center"] = P(el.Center);
                     d["major_axis"] = V(el.MajorAxis);
                     d["ratio"] = R(el.RadiusRatio);
+                    if (full) AddMetrics(d, e);
                     break;
 
                 case AttributeDefinition ad:
@@ -118,6 +124,12 @@ namespace T3LabCAD.Core
                     d["position"] = P(tb.Position);
                     d["rows"] = tb.Rows.Count;
                     d["columns"] = tb.Columns.Count;
+                    if (full) d["cells"] = Cells(tb);
+                    break;
+
+                case Region rg:
+                    try { d["area"] = R(rg.Area); d["length"] = R(rg.Perimeter); } catch (AcRx.Exception) { }
+                    if (!full) AddBox(d, e);
                     break;
 
                 case BlockReference br:
@@ -139,7 +151,12 @@ namespace T3LabCAD.Core
 
                 case Dimension dim:
                     d["dim_type"] = dim.GetType().Name;
-                    try { d["measurement"] = R(dim.Measurement); } catch (AcRx.Exception) { }
+                    try
+                    {
+                        d["measurement"] = R(dim.Measurement);
+                        if (dim is Point3AngularDimension || dim is LineAngularDimension2) d["measurement_deg"] = Deg(dim.Measurement);
+                    }
+                    catch (AcRx.Exception) { }
                     if (!string.IsNullOrEmpty(dim.DimensionText)) d["text_override"] = dim.DimensionText;
                     d["style"] = dim.DimensionStyleName;
                     if (full)
@@ -174,13 +191,20 @@ namespace T3LabCAD.Core
                     d["control_points"] = sp.NumControlPoints;
                     d["closed"] = sp.Closed;
                     try { d["length"] = R(sp.GetDistanceAtParameter(sp.EndParam)); } catch (AcRx.Exception) { }
+                    if (full && sp.Closed) AddMetrics(d, e);
                     break;
 
                 case MLeader ml:
-                    if (ml.ContentType == ContentType.MTextContent && ml.MText != null)
+                    if (ml.ContentType == ContentType.MTextContent)
                     {
-                        d["text"] = ml.MText.Text;
-                        d["position"] = P(ml.MText.Location);
+                        using (MText copy = ml.MText) // a new copy on every read
+                        {
+                            if (copy != null)
+                            {
+                                d["text"] = copy.Text;
+                                d["position"] = P(copy.Location);
+                            }
+                        }
                     }
                     else d["content"] = ml.ContentType.ToString();
                     break;
@@ -197,6 +221,7 @@ namespace T3LabCAD.Core
 
                 case Curve curve:
                     try { d["length"] = R(curve.GetDistanceAtParameter(curve.EndParam)); } catch (AcRx.Exception) { }
+                    if (full) AddMetrics(d, e);
                     if (!full) AddBox(d, e);
                     break;
 
@@ -205,6 +230,34 @@ namespace T3LabCAD.Core
                     break;
             }
             return d;
+        }
+
+        /// <summary>length / area when the entity has them (area only for closed shapes).</summary>
+        static void AddMetrics(Dictionary<string, object> d, Entity e)
+        {
+            double? length = Metrics.Length(e), area = Metrics.Area(e);
+            if (length.HasValue) d["length"] = R(length.Value);
+            if (area.HasValue) d["area"] = R(area.Value);
+        }
+
+        const int MaxCells = 400;
+
+        /// <summary>Table contents row by row (first 400 cells).</summary>
+        static List<object> Cells(Table tb)
+        {
+            var rows = new List<object>();
+            int n = 0;
+            for (int r = 0; r < tb.Rows.Count && n < MaxCells; r++)
+            {
+                var row = new List<object>();
+                for (int c = 0; c < tb.Columns.Count && n < MaxCells; c++, n++)
+                {
+                    try { row.Add(tb.Cells[r, c].TextString ?? ""); }
+                    catch (AcRx.Exception) { row.Add(""); }
+                }
+                rows.Add(row);
+            }
+            return rows;
         }
 
         static void AddBox(Dictionary<string, object> d, Entity e)
@@ -224,7 +277,7 @@ namespace T3LabCAD.Core
             return result;
         }
 
-        static Dictionary<string, object> DynamicProperties(BlockReference br)
+        internal static Dictionary<string, object> DynamicProperties(BlockReference br)
         {
             var result = new Dictionary<string, object>();
             try
@@ -233,7 +286,8 @@ namespace T3LabCAD.Core
                 {
                     if (prop.PropertyName == "Origin") continue;
                     object v = prop.Value;
-                    result[prop.PropertyName] = v is double dv ? R(dv) : v is string || v is short || v is int || v is bool ? v : Convert.ToString(v);
+                    if (v is double dv && prop.UnitsType == DynamicBlockReferencePropertyUnitsType.Angular) v = Deg(dv); // degrees, like the rest of the API
+                    result[prop.PropertyName] = v is double d2 ? R(d2) : v is string || v is short || v is int || v is bool ? v : Convert.ToString(v);
                 }
             }
             catch (AcRx.Exception)

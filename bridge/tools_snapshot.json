@@ -457,6 +457,77 @@
    }
   },
   {
+   "name": "set_viewport",
+   "title": "Edit viewport",
+   "description": "Change a layout viewport (handle from query_entities types=[VIEWPORT] or add_viewport): scale, view_center or view_window (fit), lock, on / off, layer, and per-viewport layer freeze (freeze_layers / thaw_layers, wildcards allowed, like VPLAYER). locked is the state after the call: a locked viewport can change its view with locked=true (stays locked) or false. The viewport layout becomes current.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "handle": {
+      "type": "string",
+      "description": "Viewport handle"
+     },
+     "scale": {
+      "description": "Viewport scale, e.g. 1:100, 1/50 or 0.01"
+     },
+     "view_center": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Model point at the viewport center"
+     },
+     "view_window": {
+      "type": "array",
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "description": "Model area [[x1, y1], [x2, y2]] to fit (scale from it unless scale is given)"
+     },
+     "locked": {
+      "type": "boolean",
+      "description": "Lock / unlock the display"
+     },
+     "on": {
+      "type": "boolean",
+      "description": "Viewport on / off"
+     },
+     "freeze_layers": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layers to freeze in this viewport only, wildcards allowed"
+     },
+     "thaw_layers": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layers to thaw in this viewport, wildcards allowed"
+     },
+     "layer": {
+      "type": "string",
+      "description": "Layer for the viewport (created if missing)"
+     }
+    },
+    "required": [
+     "handle"
+    ]
+   },
+   "annotations": {
+    "title": "Edit viewport",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "export_pdf",
    "title": "Export to PDF",
    "description": "Plot layouts of the active drawing to PDF (or DWFx / DWF): one multi-sheet file, or one file per layout. Uses each layout page setup; paper, plot_style, area, scale, center and rotation override it. Model space defaults to its extents, fit to the paper. list_options=true lists plotters, paper sizes and plot styles instead.",
@@ -1103,9 +1174,58 @@
    }
   },
   {
+   "name": "import_from_drawing",
+   "title": "Import from drawing",
+   "description": "Copy blocks, layers, text / dimension / multileader / table styles or linetypes from another .dwg or .dwt into the active drawing, with what they depend on (a block brings its layers and styles; ones that already exist here are kept). Objects that already exist are skipped, or redefined with replace=true: a block gets the new contents (every insert changes; run sync_block_attributes if its attributes changed); layers and styles get the new settings. Dynamic blocks are not redefined here.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Source drawing or template (.dwg / .dwt)"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "block",
+       "layer",
+       "text_style",
+       "dim_style",
+       "linetype",
+       "mleader_style",
+       "table_style"
+      ],
+      "description": "Kind of object"
+     },
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Names to import, wildcards allowed (* = all)"
+     },
+     "replace": {
+      "type": "boolean",
+      "description": "Redefine objects that already exist (default false: keep them)"
+     }
+    },
+    "required": [
+     "path",
+     "kind",
+     "names"
+    ]
+   },
+   "annotations": {
+    "title": "Import from drawing",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "query_entities",
    "title": "Find entities",
-   "description": "Find entities in a space (or by handle) with filters, and get their geometry. Returns total_matched, counts_by_type / counts_by_layer and one page of entities (limit/offset). Types are DXF names: LINE, LWPOLYLINE, CIRCLE, ARC, TEXT, MTEXT, INSERT (block reference), DIMENSION, HATCH, POINT, SPLINE, ELLIPSE, MULTILEADER, VIEWPORT... Use detail=count to only count, full for color/linetype/bbox/all vertices.",
+   "description": "Find entities in a space (or by handle) with filters, and get their geometry. Returns total_matched, counts_by_type / counts_by_layer and one page of entities (limit/offset). Types are DXF names: LINE, LWPOLYLINE, CIRCLE, ARC, TEXT, MTEXT, INSERT (block reference), DIMENSION, HATCH, POINT, SPLINE, ELLIPSE, MULTILEADER, VIEWPORT... Use detail=count to only count, full for color/linetype/bbox/all vertices/length/area/table cells. totals=true adds total_length / total_area of the matches.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1137,6 +1257,26 @@
      "text_contains": {
       "type": "string",
       "description": "Keep entities whose text, attribute values or block name contain this (case-insensitive)"
+     },
+     "colors": {
+      "type": "array",
+      "items": {},
+      "description": "Keep these colors: ACI number, ByLayer, ByBlock, name or #RRGGBB"
+     },
+     "linetypes": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Keep these linetypes (as set on the entity, e.g. ByLayer, DASHED), wildcards allowed"
+     },
+     "closed": {
+      "type": "boolean",
+      "description": "Keep only closed (true) or open (false) curves"
+     },
+     "totals": {
+      "type": "boolean",
+      "description": "Also sum length and area of the matched entities (default false)"
      },
      "window": {
       "type": "array",
@@ -1309,9 +1449,197 @@
    }
   },
   {
+   "name": "measure",
+   "title": "Measure",
+   "description": "Measure in drawing units (WCS). mode: distance {points: chain of 2+ points}; angle {points [vertex, p1, p2] or handles of 2 lines}; area {points polygon, or handles of closed curves / hatches / regions}; length {handles}; bbox {handles}; closest {handles [curve], point}; intersections {handles (2+), extend}.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "mode": {
+      "type": "string",
+      "enum": [
+       "distance",
+       "angle",
+       "area",
+       "length",
+       "bbox",
+       "closest",
+       "intersections"
+      ],
+      "description": "What to measure"
+     },
+     "points": {
+      "type": "array",
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "description": "Points [[x, y], ...]"
+     },
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "point": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "closest: the point to project"
+     },
+     "extend": {
+      "type": "boolean",
+      "description": "intersections: also where the extended curves would meet (default false)"
+     }
+    },
+    "required": [
+     "mode"
+    ]
+   },
+   "annotations": {
+    "title": "Measure",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "quantity_takeoff",
+   "title": "Quantity takeoff",
+   "description": "Count, total length and total area of entities grouped by layer, type and/or block, like a bill of quantities. Length counts curves (lines, polylines, arcs, circles, splines...), area counts closed curves, hatches and regions. length_factor / area_factor convert units (drawing in mm: 0.001 and 0.000001 give m and m2). csv_path also writes a CSV.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "space": {
+      "type": "string",
+      "description": "model (default), paper, current, a layout name, or all"
+     },
+     "types": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "DXF type names, wildcards allowed"
+     },
+     "layers": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layer names, wildcards allowed"
+     },
+     "block_names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "For INSERT: block names, wildcards allowed"
+     },
+     "group_by": {
+      "type": "string",
+      "enum": [
+       "layer",
+       "type",
+       "block",
+       "layer_type",
+       "layer_block"
+      ],
+      "description": "Grouping (default layer_type)"
+     },
+     "length_factor": {
+      "type": "number",
+      "description": "Multiply lengths by this (default 1)"
+     },
+     "area_factor": {
+      "type": "number",
+      "description": "Multiply areas by this (default 1)"
+     },
+     "csv_path": {
+      "type": "string",
+      "description": "Also write the table to this .csv (UTF-8, opens in Excel)"
+     },
+     "delimiter": {
+      "type": "string",
+      "enum": [
+       ",",
+       ";"
+      ],
+      "description": "CSV separator (default ,; use ; for Excel with comma decimals)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Quantity takeoff",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "extract_block_data",
+   "title": "Extract block data",
+   "description": "One row per block insert: block, layer, layout, position, rotation, scale, every attribute value (by tag) and dynamic property (dyn:NAME, angles in degrees). Like DATAEXTRACTION; csv_path also writes a CSV for Excel.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "block_names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Block names, wildcards allowed (default all blocks, xrefs excluded)"
+     },
+     "space": {
+      "type": "string",
+      "description": "all (default), model, paper, current or a layout name"
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Only these attribute tags (default all)"
+     },
+     "dynamic": {
+      "type": "boolean",
+      "description": "Include dynamic block properties (default true)"
+     },
+     "csv_path": {
+      "type": "string",
+      "description": "Also write the rows to this .csv (UTF-8, opens in Excel)"
+     },
+     "delimiter": {
+      "type": "string",
+      "enum": [
+       ",",
+       ";"
+      ],
+      "description": "CSV separator (default ,; use ; for Excel with comma decimals)"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max rows returned in the result (default 500; the CSV gets all)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Extract block data",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "add_entities",
    "title": "Draw entities",
-   "description": "Create entities in one undo step (all or nothing). Each item has a type and its fields; all accept layer (created if missing), color, linetype, lineweight. Types: line {start, end}; polyline {points, closed, bulges, width}; rectangle {corner1, corner2}; circle {center, radius}; arc {center, radius, start_angle, end_angle} or {points: [p1, p2, p3]}; ellipse {center, major_axis [dx, dy], ratio}; point {position}; text {position, text, height, rotation, align (left, center, right, middle_center, top_left...), style}; mtext {position, text (\\\\n for new line), height, width, rotation, attachment (top_left...), style}; insert {block, position, scale, rotation, attributes {TAG: value}, block_file (a .dwg imported as the block when missing)}; dim_aligned {p1, p2, dim_point, text, style}; dim_linear {p1, p2, dim_point, rotation (0 horizontal, 90 vertical), text, style}; hatch {points (closed polygon) or boundary_handles, pattern (SOLID, ANSI31...), scale, angle}; spline {points}. Angles in degrees CCW; height defaults to TEXTSIZE.",
+   "description": "Create entities in one undo step (all or nothing). Each item has a type and its fields; all accept layer (created if missing), color, linetype, lineweight. Types: line {start, end}; polyline {points, closed, bulges, width}; rectangle {corner1, corner2}; circle {center, radius}; arc {center, radius, start_angle, end_angle} or {points: [p1, p2, p3]}; ellipse {center, major_axis [dx, dy], ratio}; point {position}; text {position, text, height, rotation, align (left, center, right, middle_center, top_left...), style}; mtext {position, text (\\\\n for new line), height, width, rotation, attachment (top_left...), style}; attdef {position, tag, prompt, default, height, rotation, invisible, style} (attribute definition, for create_block); insert {block, position, scale, rotation, attributes {TAG: value}, block_file (a .dwg imported as the block when missing)}; dim_aligned {p1, p2, dim_point, text, style}; dim_linear {p1, p2, dim_point, rotation (0 horizontal, 90 vertical), text, style}; hatch {points (closed polygon) or boundary_handles, pattern (SOLID, ANSI31...), scale, angle}; spline {points}; table {position (top left), rows [[cell...]...], title, header (first row is a header, default true), col_widths (number or list), row_height, text_height, style}; mleader {points [arrow, ..., landing], text, text_height, style}; dim_radius / dim_diameter {handle (circle or arc) + angle, or center + chord_point; leader_length}; dim_angular {center, p1, p2, arc_point}; dim_arc {handle (arc) or center, p1, p2, arc_point}; dim_ordinate {point, leader_end, axis x or y, origin}; dim_chain {points, dim_point, rotation, mode continue or baseline, spacing}. Angles in degrees CCW; height defaults to TEXTSIZE.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1336,11 +1664,20 @@
           "point",
           "text",
           "mtext",
+          "attdef",
           "insert",
           "dim_aligned",
           "dim_linear",
           "hatch",
-          "spline"
+          "spline",
+          "table",
+          "mleader",
+          "dim_radius",
+          "dim_diameter",
+          "dim_angular",
+          "dim_arc",
+          "dim_ordinate",
+          "dim_chain"
          ]
         }
        },
@@ -1365,7 +1702,7 @@
   {
    "name": "update_entities",
    "title": "Modify entities",
-   "description": "Change properties of entities. Either handles + set (same change for all) or items [{handle, ...props}]. Props: layer, color, linetype, lineweight, text, height, rotation, position, start, end, center, radius, closed, width, scale, attributes {TAG: value}. Props that do not apply to an entity type are reported in skipped.",
+   "description": "Change properties of entities. Either handles + set (same change for all) or items [{handle, ...props}]. Props: layer, color, linetype, lineweight, text, height, rotation, position, start, end, center, radius, closed, width, scale, attributes {TAG: value}, dynamic_props {NAME: value} (dynamic blocks; angles in degrees; lists take one of the allowed values), points + bulges (polyline vertices), cells [{row, col, text}] (tables, 0-based), draw_order (top or bottom). Props that do not apply to an entity type are reported in skipped. Each entity is changed completely or not at all.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1608,6 +1945,187 @@
    },
    "annotations": {
     "title": "Explode",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "replace_text",
+   "title": "Find and replace text",
+   "description": "Find and replace in TEXT, MTEXT, block attribute values, dimension text overrides, multileader text and table cells (one undo step). Plain text by default, regex=true for regular expressions ($1 in replace). dry_run=true only counts and shows samples. Entities on locked layers are skipped and counted; an MTEXT whose formatting splits the match is reported, not changed.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "find": {
+      "type": "string",
+      "description": "Text to find (or a regular expression with regex=true)"
+     },
+     "replace": {
+      "type": "string",
+      "description": "Replacement (may be empty)"
+     },
+     "regex": {
+      "type": "boolean",
+      "description": "find is a .NET regular expression (default false)"
+     },
+     "match_case": {
+      "type": "boolean",
+      "description": "Case sensitive (default false)"
+     },
+     "whole_word": {
+      "type": "boolean",
+      "description": "Only whole words (default false)"
+     },
+     "types": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "text",
+        "mtext",
+        "attribute",
+        "dimension",
+        "mleader",
+        "table"
+       ]
+      },
+      "description": "Where to look (default all)"
+     },
+     "layers": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layer names, wildcards allowed"
+     },
+     "space": {
+      "type": "string",
+      "description": "all (default), model, paper, current or a layout name"
+     },
+     "include_blocks": {
+      "type": "boolean",
+      "description": "Also change text inside block definitions (default false)"
+     },
+     "dry_run": {
+      "type": "boolean",
+      "description": "Count and show samples only (default false)"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max samples returned (default 50)"
+     }
+    },
+    "required": [
+     "find",
+     "replace"
+    ]
+   },
+   "annotations": {
+    "title": "Find and replace text",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "edit_geometry",
+   "title": "Offset / join / boundary",
+   "description": "Geometry edits. offset {handles (curves), distance, side_point (which side) or both=true}; join {handles: lines, arcs, polylines touching end to end, joined into one polyline (or splines into a spline)}; boundary {point inside a closed area, islands} creates the closed polyline(s) around it, like BOUNDARY: the area must be visible on screen (zoom first). New entities are returned with their length / area.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "operation": {
+      "type": "string",
+      "enum": [
+       "offset",
+       "join",
+       "boundary"
+      ],
+      "description": "What to do"
+     },
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "distance": {
+      "type": "number",
+      "description": "offset: distance (> 0)"
+     },
+     "side_point": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "offset: a point on the side to offset to"
+     },
+     "both": {
+      "type": "boolean",
+      "description": "offset: both sides (default false)"
+     },
+     "point": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "boundary: a point inside the area"
+     },
+     "islands": {
+      "type": "boolean",
+      "description": "boundary: detect islands inside the area (default true)"
+     },
+     "layer": {
+      "type": "string",
+      "description": "Layer for the new entities (default: as the source / current layer)"
+     }
+    },
+    "required": [
+     "operation"
+    ]
+   },
+   "annotations": {
+    "title": "Offset / join / boundary",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "sync_block_attributes",
+   "title": "Sync block attributes",
+   "description": "Like ATTSYNC: make every insert of the blocks match the block definition attributes. Missing attributes are added with their default value, existing values are kept, attributes no longer in the definition are removed (remove_extra), and position / style / height follow the definition unless keep_positions=true. Inserts on locked layers are skipped.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Block names, wildcards allowed"
+     },
+     "keep_positions": {
+      "type": "boolean",
+      "description": "Keep the position and look of existing attributes (default false)"
+     },
+     "remove_extra": {
+      "type": "boolean",
+      "description": "Remove attributes whose tag is not in the definition (default true)"
+     }
+    },
+    "required": [
+     "names"
+    ]
+   },
+   "annotations": {
+    "title": "Sync block attributes",
     "readOnlyHint": false,
     "destructiveHint": false,
     "openWorldHint": false

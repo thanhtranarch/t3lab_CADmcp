@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
@@ -36,6 +37,23 @@ namespace T3LabCAD.Core
                     P("layer", Str("Layer for the viewport (created if missing)")),
                     P("locked", Bool("Lock the display (default false)"))),
                 AddViewport, tx: false);
+
+            Registry.Add("set_viewport", "Edit viewport", ToolKind.Write,
+                "Change a layout viewport (handle from query_entities types=[VIEWPORT] or add_viewport): scale, view_center or view_window " +
+                "(fit), lock, on / off, layer, and per-viewport layer freeze (freeze_layers / thaw_layers, wildcards allowed, like VPLAYER). " +
+                "locked is the state after the call: a locked viewport can change its view with locked=true (stays locked) or false. " +
+                "The viewport layout becomes current.",
+                ObjR("handle",
+                    P("handle", Str("Viewport handle")),
+                    P("scale", Any("Viewport scale, e.g. 1:100, 1/50 or 0.01")),
+                    P("view_center", Pt("Model point at the viewport center")),
+                    P("view_window", Pts("Model area [[x1, y1], [x2, y2]] to fit (scale from it unless scale is given)")),
+                    P("locked", Bool("Lock / unlock the display")),
+                    P("on", Bool("Viewport on / off")),
+                    P("freeze_layers", Strs("Layers to freeze in this viewport only, wildcards allowed")),
+                    P("thaw_layers", Strs("Layers to thaw in this viewport, wildcards allowed")),
+                    P("layer", Str("Layer for the viewport (created if missing)"))),
+                SetViewport, tx: false);
         }
 
         static object CreateLayout(ToolContext c, Args a)
@@ -96,6 +114,106 @@ namespace T3LabCAD.Core
 
         internal static string ScaleText(double scale) =>
             scale >= 1 ? $"{Geo.R(scale)}:1" : $"1:{Geo.R(1 / scale)}";
+
+        static List<ObjectId> LayersMatching(Database db, Transaction tr, List<string> patterns)
+        {
+            var ids = new List<ObjectId>();
+            if (patterns.Count == 0) return ids;
+            foreach (ObjectId id in (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead))
+            {
+                var layer = (LayerTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                if (!layer.IsErased && Wild.Any(layer.Name, patterns)) ids.Add(id);
+            }
+            if (ids.Count == 0) throw new ToolError($"No layer matches {string.Join(", ", patterns)}.");
+            return ids;
+        }
+
+        static object SetViewport(ToolContext c, Args a)
+        {
+            var db = c.Db;
+            LayoutManager lm = LayoutManager.Current;
+            ObjectId id = Acad.Id(db, a.ReqStr("handle"));
+            string layoutName;
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                if (!(tr.GetObject(id, OpenMode.ForRead) is Viewport vp)) throw new ToolError("handle is not a viewport (query_entities types=[VIEWPORT]).");
+                var owner = (BlockTableRecord)tr.GetObject(vp.OwnerId, OpenMode.ForRead);
+                if (!owner.IsLayout || owner.ObjectId == SymbolUtilityServices.GetBlockModelSpaceId(db))
+                    throw new ToolError("This viewport is not on a paper space layout.");
+                ObjectId firstViewport = owner.Cast<ObjectId>().FirstOrDefault(e => e.ObjectClass.DxfName == "VIEWPORT");
+                if (firstViewport == id) throw new ToolError("This is the layout's own paper space viewport, not a viewport placed on it.");
+                layoutName = ((Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead)).LayoutName;
+                tr.Commit();
+            }
+            if (!lm.CurrentLayout.Equals(layoutName, StringComparison.OrdinalIgnoreCase)) lm.CurrentLayout = layoutName;
+
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                var vp = (Viewport)tr.GetObject(id, OpenMode.ForWrite);
+                bool changesView = a.Has("scale") || a.Has("view_center") || a.Has("view_window");
+                if (vp.Locked && changesView)
+                {
+                    // locked is the state after the call: true changes the view and keeps it locked
+                    if (!a.Has("locked"))
+                        throw new ToolError("The viewport is locked: pass locked=true (change it and keep it locked) or locked=false (unlock it).");
+                    vp.Locked = false;
+                }
+
+                // ViewCenter is in the viewport's display coordinates (target, direction and twist), the API takes WCS points
+                Matrix3d dcsToWcs = Matrix3d.Rotation(-vp.TwistAngle, vp.ViewDirection, vp.ViewTarget) *
+                                    Matrix3d.Displacement(vp.ViewTarget - Point3d.Origin) *
+                                    Matrix3d.PlaneToWorld(vp.ViewDirection);
+                Matrix3d wcsToDcs = dcsToWcs.Inverse();
+                if (a.Has("view_window"))
+                {
+                    List<Point3d> w = a.Pts("view_window");
+                    if (w.Count != 2) throw new ToolError("view_window must be [[x1, y1], [x2, y2]].");
+                    var corners = new[]
+                    {
+                        new Point3d(w[0].X, w[0].Y, 0), new Point3d(w[1].X, w[0].Y, 0),
+                        new Point3d(w[1].X, w[1].Y, 0), new Point3d(w[0].X, w[1].Y, 0),
+                    }.Select(p => p.TransformBy(wcsToDcs)).ToList();
+                    double minX = corners.Min(p => p.X), maxX = corners.Max(p => p.X);
+                    double minY = corners.Min(p => p.Y), maxY = corners.Max(p => p.Y);
+                    double ww = maxX - minX, wh = maxY - minY;
+                    if (ww < 1e-9 || wh < 1e-9) throw new ToolError("view_window must span a rectangle.");
+                    vp.ViewCenter = new Point2d((minX + maxX) / 2, (minY + maxY) / 2);
+                    if (!a.Has("scale")) vp.CustomScale = Math.Min(vp.Width / ww, vp.Height / wh);
+                }
+                if (a.Has("view_center"))
+                {
+                    Point3d vc = a.ReqPt("view_center").TransformBy(wcsToDcs);
+                    vp.ViewCenter = new Point2d(vc.X, vc.Y);
+                }
+                if (a.Has("scale")) vp.CustomScale = ParseScale(a.Raw("scale"));
+
+                List<ObjectId> freeze = LayersMatching(db, tr, a.Strs("freeze_layers"));
+                if (freeze.Count > 0) vp.FreezeLayersInViewport(freeze.GetEnumerator());
+                List<ObjectId> thaw = LayersMatching(db, tr, a.Strs("thaw_layers"));
+                if (thaw.Count > 0) vp.ThawLayersInViewport(thaw.GetEnumerator());
+                if (a.Has("layer")) vp.LayerId = Acad.EnsureLayer(db, tr, a.ReqStr("layer"));
+                if (a.Has("on")) vp.On = a.Bool("on", true);
+                if (a.Has("locked")) vp.Locked = a.Bool("locked", false);
+
+                var frozen = new List<object>();
+                foreach (ObjectId lid in vp.GetFrozenLayers())
+                    frozen.Add(((LayerTableRecord)tr.GetObject(lid, OpenMode.ForRead)).Name);
+                var result = new Dictionary<string, object>
+                {
+                    ["handle"] = vp.Handle.ToString(),
+                    ["layout"] = layoutName,
+                    ["scale"] = Geo.R(vp.CustomScale),
+                    ["scale_text"] = vp.CustomScale > 0 ? ScaleText(vp.CustomScale) : "?",
+                    ["view_center"] = Geo.P(new Point3d(vp.ViewCenter.X, vp.ViewCenter.Y, 0).TransformBy(dcsToWcs)),
+                    ["locked"] = vp.Locked,
+                    ["on"] = vp.On,
+                    ["frozen_layers"] = frozen,
+                };
+                tr.Commit();
+                c.NeedsRegen = true;
+                return result;
+            }
+        }
 
         static object AddViewport(ToolContext c, Args a)
         {
