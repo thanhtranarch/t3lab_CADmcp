@@ -83,13 +83,15 @@ def main():
     mock.stdout.readline()
     try:
         c = Client(env)
-        c.request("initialize", {"protocolVersion": "2099-01-01", "capabilities": {}})
+        c.request("initialize", {"protocolVersion": "2099-01-01", "capabilities": {}, "clientInfo": {"name": "Claude Code", "version": "2.1"}})
         tools = [t["name"] for t in c.request("tools/list")["result"]["tools"]]
         check("tools/list live", "get_status" in tools and "switch_autocad_instance" in tools, tools)
         check("cache written", os.path.exists(os.path.join(appdata, "T3LabCAD", "tools_cache.json")))
         r = c.request("tools/call", {"name": "get_status", "arguments": {"a": 1, "autocad_port": PORT}})["result"]
-        echo = json.loads(r["content"][0]["text"])["echo"]
+        reply = json.loads(r["content"][0]["text"])
+        echo = reply["echo"]
         check("forwarded call, pin stripped", echo == {"a": 1}, echo)
+        check("clientInfo forwarded for Agent Cursors", reply["client"] == {"name": "Claude Code", "version": "2.1"}, reply["client"])
         r = c.request("tools/call", {"name": "fail", "arguments": {}})["result"]
         check("isError passthrough", r.get("isError") is True, r)
         r = c.request("tools/call", {"name": "get_status", "arguments": {"big": 200000}})["result"]
