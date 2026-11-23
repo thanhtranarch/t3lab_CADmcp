@@ -33,7 +33,7 @@ class Handler(socketserver.StreamRequestHandler):
                 if params.get("name") == "fail":
                     result = {"content": [{"type": "text", "text": "mock failure"}], "isError": True}
                 else:
-                    text = json.dumps({"echo": params.get("arguments"), "big": "x" * int((params.get("arguments") or {}).get("big", 0))})
+                    text = json.dumps({"echo": params.get("arguments"), "client": params.get("client"), "big": "x" * int((params.get("arguments") or {}).get("big", 0))})
                     result = {"content": [{"type": "text", "text": text}]}
             else:
                 self.wfile.write((json.dumps({"id": req.get("id"), "error": {"code": -32601, "message": "nope"}}) + "\n").encode())

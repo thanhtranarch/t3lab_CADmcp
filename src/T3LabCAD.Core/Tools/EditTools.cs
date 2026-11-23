@@ -25,6 +25,8 @@ namespace T3LabCAD.Core
                 "text {position, text, height, rotation, align (left, center, right, middle_center, top_left...), style}; " +
                 "mtext {position, text (\\\\n for new line), height, width, rotation, attachment (top_left...), style}; " +
                 "attdef {position, tag, prompt, default, height, rotation, invisible, style} (attribute definition, for create_block); " +
+                "text / mtext take field {type: filename, date, savedate, plotdate, author, title, area, length, object (+ property), or code; " +
+                "handle (area / length / object), format, precision, factor (e.g. 0.000001 for mm2 to m2), prefix, suffix} instead of text; " +
                 "insert {block, position, scale, rotation, attributes {TAG: value}, block_file (a .dwg imported as the block when missing)}; " +
                 "dim_aligned {p1, p2, dim_point, text, style}; dim_linear {p1, p2, dim_point, rotation (0 horizontal, 90 vertical), text, style}; " +
                 "hatch {points (closed polygon) or boundary_handles, pattern (SOLID, ANSI31...), scale, angle}; spline {points}; " +
@@ -53,18 +55,31 @@ namespace T3LabCAD.Core
                 "Erase entities by handle (one undo step).",
                 ObjR("handles", Handles), DeleteEntities, destructive: true);
 
-            Registry.Add("transform_entities", "Move / copy / rotate / scale / mirror", ToolKind.Write,
+            Registry.Add("transform_entities", "Move / copy / rotate / scale / mirror / array / align", ToolKind.Write,
                 "Transform entities by handle. operation: move {displacement [dx, dy] or from + to}; rotate {base_point, angle}; " +
-                "scale {base_point, factor}; mirror {mirror_line [[x1, y1], [x2, y2]]}. copy=true transforms copies and returns their handles. " +
+                "scale {base_point, factor}; mirror {mirror_line [[x1, y1], [x2, y2]]}; align {source_points [p1, p2], target_points [q1, q2], " +
+                "scale_to_fit} (move p1 to q1, turn p1-p2 onto q1-q2); array_rect {rows, columns, row_spacing, column_spacing, angle " +
+                "(direction of the rows)}; array_polar {center, count (total, with the original), angle (fill, default 360), rotate_items}. " +
+                "copy=true transforms copies and returns their handles; arrays always make copies (not associative). " +
                 "Mirror does not keep text readable (MIRRTEXT is not applied).",
                 ObjR("handles,operation", Handles,
-                    P("operation", Enum("Transformation", "move", "rotate", "scale", "mirror")),
+                    P("operation", Enum("Transformation", "move", "rotate", "scale", "mirror", "align", "array_rect", "array_polar")),
+                    P("source_points", Pts("align: [p1] or [p1, p2] on the entities")),
+                    P("target_points", Pts("align: where they go, [q1] or [q1, q2]")),
+                    P("scale_to_fit", Bool("align: scale so p1-p2 matches q1-q2 (default false)")),
+                    P("rows", Int("array_rect: rows (default 1)")),
+                    P("columns", Int("array_rect: columns (default 1)")),
+                    P("row_spacing", Num("array_rect: distance between rows")),
+                    P("column_spacing", Num("array_rect: distance between columns")),
+                    P("center", Pt("array_polar: center")),
+                    P("count", Int("array_polar: number of items including the original")),
+                    P("rotate_items", Bool("array_polar: turn the copies with the array (default true)")),
                     P("copy", Bool("Transform copies instead of the originals")),
                     P("displacement", Pt("move: [dx, dy]")),
                     P("from", Pt("move: base point")),
                     P("to", Pt("move: target point")),
                     P("base_point", Pt("rotate/scale: base point")),
-                    P("angle", Num("rotate: degrees CCW")),
+                    P("angle", Num("rotate: degrees CCW; array_rect: direction of the rows; array_polar: fill angle (default 360)")),
                     P("factor", Num("scale: factor")),
                     P("mirror_line", Pts("mirror: two points"))),
                 Transform);
@@ -96,6 +111,7 @@ namespace T3LabCAD.Core
             if (items == null || items.Count == 0) throw new ToolError("'items' must be a non-empty array.");
             ObjectId spaceId = Acad.SpaceId(c.Db, c.Tr, a.Str("space"));
             var space = (BlockTableRecord)c.Tr.GetObject(spaceId, OpenMode.ForWrite);
+            if (!space.IsLayout) c.NeedsRegen = true; // a block definition: its inserts redraw with the new contents
 
             var created = new List<object>();
             for (int i = 0; i < items.Count; i++)
@@ -122,12 +138,16 @@ namespace T3LabCAD.Core
                 catch (ToolError te) { throw new ToolError($"items[{i}] ({type}): {te.Message} Nothing was created."); }
                 catch (AcRx.Exception ae) { throw new ToolError($"items[{i}] ({type}): AutoCAD error {ae.ErrorStatus}{Where(ae)}. Nothing was created."); }
             }
-            return new Dictionary<string, object>
+            var result = new Dictionary<string, object>
             {
                 ["space"] = Acad.SpaceName(c.Tr, spaceId),
                 ["created_count"] = created.Count,
                 ["created"] = created,
             };
+            if (!space.IsLayout && space.IsDynamicBlock)
+                result["note"] = "Dynamic block: inserts whose parameters were changed use anonymous copies and do not show this until " +
+                                 "the block is opened and saved in the Block Editor (BEDIT).";
+            return result;
         }
 
         static Entity Create(ToolContext c, BlockTableRecord space, string type, Args it)
@@ -203,7 +223,7 @@ namespace T3LabCAD.Core
                     Point3d at = it.ReqPt("position");
                     var t = new DBText();
                     t.SetDatabaseDefaults(db);
-                    t.TextString = it.ReqStr("text");
+                    t.TextString = it.Has("field") ? it.Str("text") ?? "-" : it.ReqStr("text");
                     t.Height = Positive(it.Num("height", db.Textsize), "height");
                     t.Rotation = Rad(it.Num("rotation", 0));
                     t.TextStyleId = Acad.TextStyle(db, tr, it.Str("style"));
@@ -212,6 +232,7 @@ namespace T3LabCAD.Core
                     if (justified) t.AlignmentPoint = at;
                     Add(c, space, t, it);
                     if (justified) t.AdjustAlignment(db);
+                    if (it.Has("field")) FieldTools.Attach(c, t, it.Raw("field"));
                     return t;
                 }
 
@@ -220,13 +241,15 @@ namespace T3LabCAD.Core
                     var m = new MText();
                     m.SetDatabaseDefaults(db);
                     m.Location = it.ReqPt("position");
-                    m.Contents = MTextContents(it.ReqStr("text"));
+                    m.Contents = MTextContents(it.Has("field") ? it.Str("text") ?? "-" : it.ReqStr("text"));
                     m.TextHeight = Positive(it.Num("height", db.Textsize), "height");
                     m.Width = it.Num("width", 0);
                     m.Rotation = Rad(it.Num("rotation", 0));
                     m.TextStyleId = Acad.TextStyle(db, tr, it.Str("style"));
                     m.Attachment = Attachment(it.Str("attachment"));
-                    return Add(c, space, m, it);
+                    Add(c, space, m, it);
+                    if (it.Has("field")) FieldTools.Attach(c, m, it.Raw("field"));
+                    return m;
                 }
 
                 case "attdef":
@@ -366,6 +389,21 @@ namespace T3LabCAD.Core
             }
         }
 
+        /// <summary>True when block btrId is target or has an insert of target somewhere inside it.</summary>
+        static bool Nests(Transaction tr, ObjectId btrId, ObjectId target, HashSet<ObjectId> seen)
+        {
+            if (btrId == target) return true;
+            if (!seen.Add(btrId)) return false;
+            var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+            foreach (ObjectId id in btr)
+            {
+                if (id.ObjectClass.IsDerivedFrom(AcRx.RXObject.GetClass(typeof(BlockReference))) &&
+                    tr.GetObject(id, OpenMode.ForRead) is BlockReference br && Nests(tr, br.BlockTableRecord, target, seen))
+                    return true;
+            }
+            return false;
+        }
+
         static Entity Insert(ToolContext c, BlockTableRecord space, Args it)
         {
             var db = c.Db;
@@ -389,6 +427,8 @@ namespace T3LabCAD.Core
             }
             if (!table.Has(name)) throw new ToolError($"Block '{name}' does not exist. See list_blocks, or pass block_file to import a .dwg.");
             ObjectId btrId = table[name];
+            if (!space.IsLayout && Nests(tr, btrId, space.ObjectId, new HashSet<ObjectId>()))
+                throw new ToolError($"'{name}' is or contains the block being edited ({space.Name}): a block cannot hold itself.");
 
             var br = new BlockReference(it.ReqPt("position"), btrId);
             br.SetDatabaseDefaults(db);
@@ -809,33 +849,109 @@ namespace T3LabCAD.Core
 
         // ---------------------------------------------------------------- transform / block
 
+        /// <summary>Copies of the entities (each in its own space), moved by m; their handles are added to handles.</summary>
+        static void CloneTransformed(ToolContext c, List<ObjectId> ids, Matrix3d m, List<object> handles)
+        {
+            foreach (var group in ids.GroupBy(id => c.Tr.GetObject(id, OpenMode.ForRead).OwnerId))
+            {
+                var map = new IdMapping();
+                c.Db.DeepCloneObjects(new ObjectIdCollection(group.ToArray()), group.Key, map, false);
+                foreach (IdPair pair in map)
+                {
+                    if (!pair.IsPrimary || !pair.IsCloned) continue;
+                    if (c.Tr.GetObject(pair.Value, OpenMode.ForWrite) is Entity copy)
+                    {
+                        copy.TransformBy(m);
+                        handles.Add(copy.Handle.ToString());
+                    }
+                }
+            }
+        }
+
+        const int MaxArrayCopies = 5000;
+
         static object Transform(ToolContext c, Args a)
         {
             List<ObjectId> ids = Acad.Ids(c.Db, a.Strs("handles"));
-            Matrix3d m = MatrixOf(a);
-
+            string op = (a.Str("operation") ?? "").Trim().ToLowerInvariant();
             var newHandles = new List<object>();
-            if (a.Bool("copy", false))
+            if (op == "array_rect" || op == "array_polar")
             {
-                foreach (var group in ids.GroupBy(id => c.Tr.GetObject(id, OpenMode.ForRead).OwnerId))
+                long cells = op == "array_rect" ? (long)Math.Max(1, a.Int("rows", 1)) * Math.Max(1, a.Int("columns", 1)) : Math.Max(1, a.Int("count", 0));
+                long total = (cells - 1) * Math.Max(1, ids.Count);
+                if (total > MaxArrayCopies)
+                    throw new ToolError($"That makes {total} copies; the limit is {MaxArrayCopies} per call.");
+                List<Matrix3d> copies = op == "array_rect" ? RectArray(a) : PolarArray(c, a, ids);
+                foreach (Matrix3d m in copies) CloneTransformed(c, ids, m, newHandles);
+                return new Dictionary<string, object>
                 {
-                    var map = new IdMapping();
-                    c.Db.DeepCloneObjects(new ObjectIdCollection(group.ToArray()), group.Key, map, false);
-                    foreach (IdPair pair in map)
-                    {
-                        if (!pair.IsPrimary || !pair.IsCloned) continue;
-                        if (c.Tr.GetObject(pair.Value, OpenMode.ForWrite) is Entity copy)
-                        {
-                            copy.TransformBy(m);
-                            newHandles.Add(copy.Handle.ToString());
-                        }
-                    }
-                }
-                return new Dictionary<string, object> { ["copied"] = newHandles.Count, ["new_handles"] = newHandles };
+                    ["operation"] = op,
+                    ["copies"] = copies.Count,
+                    ["new_entities"] = newHandles.Count,
+                    ["new_handles"] = newHandles.Take(2000).ToList(),
+                };
             }
 
-            foreach (ObjectId id in ids) ((Entity)c.Tr.GetObject(id, OpenMode.ForWrite)).TransformBy(m);
+            Matrix3d matrix = MatrixOf(a);
+            if (a.Bool("copy", false))
+            {
+                CloneTransformed(c, ids, matrix, newHandles);
+                return new Dictionary<string, object> { ["copied"] = newHandles.Count, ["new_handles"] = newHandles };
+            }
+            Matrix3d m0 = matrix;
+
+            foreach (ObjectId id in ids) ((Entity)c.Tr.GetObject(id, OpenMode.ForWrite)).TransformBy(m0);
             return new Dictionary<string, object> { ["transformed"] = ids.Count };
+        }
+
+        /// <summary>One displacement per array cell except the first (the originals stay where they are).</summary>
+        static List<Matrix3d> RectArray(Args a)
+        {
+            int rows = a.Int("rows", 1), cols = a.Int("columns", 1);
+            if (rows < 1 || cols < 1) throw new ToolError("rows and columns must be at least 1.");
+            if ((long)rows * cols < 2) throw new ToolError("array_rect needs rows x columns of 2 or more.");
+            double dx = cols > 1 ? a.ReqNum("column_spacing") : 0, dy = rows > 1 ? a.ReqNum("row_spacing") : 0;
+            double angle = Rad(a.Num("angle", 0));
+            var along = new Vector3d(Math.Cos(angle), Math.Sin(angle), 0);
+            var across = new Vector3d(-Math.Sin(angle), Math.Cos(angle), 0);
+            var result = new List<Matrix3d>();
+            for (int r = 0; r < rows; r++)
+                for (int col = 0; col < cols; col++)
+                    if (r != 0 || col != 0) result.Add(Matrix3d.Displacement(along * (dx * col) + across * (dy * r)));
+            return result;
+        }
+
+        static List<Matrix3d> PolarArray(ToolContext c, Args a, List<ObjectId> ids)
+        {
+            Point3d center = a.ReqPt("center");
+            int count = a.Int("count", 0);
+            if (count < 2) throw new ToolError("array_polar needs count of 2 or more (the original included).");
+            double fill = a.Num("angle", 360);
+            if (Math.Abs(fill) < 1e-9 || Math.Abs(fill) > 360) throw new ToolError("angle (fill) must be between -360 and 360, not 0.");
+            double step = Math.Abs(Math.Abs(fill) - 360) < 1e-9 ? fill / count : fill / (count - 1);
+            bool rotate = a.Bool("rotate_items", true);
+            Point3d basePoint = center;
+            if (!rotate)
+            {
+                // without rotation every copy moves like the middle of the selection would
+                var ext = new Extents3d();
+                bool any = false;
+                foreach (ObjectId id in ids)
+                {
+                    Extents3d? b = (c.Tr.GetObject(id, OpenMode.ForRead) as Entity)?.Bounds;
+                    if (!b.HasValue) continue;
+                    if (any) ext.AddExtents(b.Value); else ext = b.Value;
+                    any = true;
+                }
+                if (any) basePoint = ext.MinPoint + (ext.MaxPoint - ext.MinPoint) / 2;
+            }
+            var result = new List<Matrix3d>();
+            for (int k = 1; k < count; k++)
+            {
+                Matrix3d turn = Matrix3d.Rotation(Rad(step * k), Vector3d.ZAxis, center);
+                result.Add(rotate ? turn : Matrix3d.Displacement(basePoint.TransformBy(turn) - basePoint));
+            }
+            return result;
         }
 
         static Matrix3d MatrixOf(Args a)
@@ -853,12 +969,27 @@ namespace T3LabCAD.Core
                     return Matrix3d.Rotation(Rad(a.ReqNum("angle")), Vector3d.ZAxis, a.ReqPt("base_point"));
                 case "scale":
                     return Matrix3d.Scaling(Positive(a.ReqNum("factor"), "factor"), a.ReqPt("base_point"));
+                case "align":
+                {
+                    List<Point3d> from = a.Pts("source_points"), to = a.Pts("target_points");
+                    if (from.Count < 1 || from.Count > 2 || to.Count != from.Count)
+                        throw new ToolError("align needs source_points and target_points with 1 or 2 points each (the same count).");
+                    Matrix3d m = Matrix3d.Displacement(to[0] - from[0]);
+                    if (from.Count == 2)
+                    {
+                        Vector3d vf = from[1] - from[0], vt = to[1] - to[0];
+                        if (vf.Length < 1e-12 || vt.Length < 1e-12) throw new ToolError("The two align points must be different.");
+                        m = Matrix3d.Rotation(Math.Atan2(vt.Y, vt.X) - Math.Atan2(vf.Y, vf.X), Vector3d.ZAxis, to[0]) * m;
+                        if (a.Bool("scale_to_fit", false)) m = Matrix3d.Scaling(vt.Length / vf.Length, to[0]) * m;
+                    }
+                    return m;
+                }
                 case "mirror":
                     List<Point3d> line = a.Pts("mirror_line");
                     if (line.Count != 2 || line[0].IsEqualTo(line[1])) throw new ToolError("mirror_line must be two different points.");
                     return Matrix3d.Mirroring(new Line3d(line[0], line[1]));
                 default:
-                    throw new ToolError("operation must be move, rotate, scale or mirror.");
+                    throw new ToolError("operation must be move, rotate, scale, mirror, align, array_rect or array_polar.");
             }
         }
 

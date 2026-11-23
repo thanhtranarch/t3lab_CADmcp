@@ -34,20 +34,31 @@ namespace T3LabCAD.Core
                     P("limit", Int("Max samples returned (default 50)"))),
                 ReplaceText);
 
-            Registry.Add("edit_geometry", "Offset / join / boundary", ToolKind.Write,
-                "Geometry edits. offset {handles (curves), distance, side_point (which side) or both=true}; " +
+            Registry.Add("edit_geometry", "Edit geometry", ToolKind.Write,
+                "Geometry edits in the XY plane (WCS). offset {handles (curves), distance, side_point (which side) or both=true}; " +
                 "join {handles: lines, arcs, polylines touching end to end, joined into one polyline (or splines into a spline)}; " +
                 "boundary {point inside a closed area, islands} creates the closed polyline(s) around it, like BOUNDARY: the area must " +
-                "be visible on screen (zoom first). New entities are returned with their length / area.",
+                "be visible on screen (zoom first); extend {handles, boundary_handles (edges), end start / end / both / auto (pick_point " +
+                "picks the end)}; trim {handles, boundary_handles (cutting edges), pick_point on the part to remove, or pick_points one " +
+                "per handle}; break {handles [one curve], point, point2 (the part between is removed; without point2 the curve is split)}; " +
+                "fillet {handles: 2 lines + radius (0 = sharp corner), or 1 polyline = every corner}; chamfer {same, distance, distance2}. " +
+                "Lines that cross keep their part on the far side of the corner. New entities come back with their length / area.",
                 ObjR("operation",
-                    P("operation", Enum("What to do", "offset", "join", "boundary")),
+                    P("operation", Enum("What to do", "offset", "join", "boundary", "extend", "trim", "break", "fillet", "chamfer")),
                     Handles,
-                    P("distance", Num("offset: distance (> 0)")),
+                    P("distance", Num("offset: distance (> 0); chamfer: distance on the first line")),
+                    P("distance2", Num("chamfer: distance on the second line (default distance)")),
+                    P("radius", Num("fillet: radius (default 0)")),
                     P("side_point", Pt("offset: a point on the side to offset to")),
                     P("both", Bool("offset: both sides (default false)")),
-                    P("point", Pt("boundary: a point inside the area")),
+                    P("point", Pt("boundary: a point inside the area; break: first point")),
+                    P("point2", Pt("break: second point")),
                     P("islands", Bool("boundary: detect islands inside the area (default true)")),
-                    P("layer", Str("Layer for the new entities (default: as the source / current layer)"))),
+                    P("boundary_handles", Strs("extend / trim: the boundary or cutting edges")),
+                    P("pick_point", Pt("trim: a point on the part to remove; extend: near the end to extend")),
+                    P("pick_points", Pts("trim: one point per handle")),
+                    P("end", Enum("extend: which end (default auto)", "start", "end", "both", "auto")),
+                    P("layer", Str("Layer for the new entities of offset / join / boundary (default: as the source / current layer)"))),
                 EditGeometry);
 
             Registry.Add("sync_block_attributes", "Sync block attributes", ToolKind.Write,
@@ -386,7 +397,12 @@ namespace T3LabCAD.Core
                 case "offset": return Offset(c, a, layerId);
                 case "join": return Join(c, a, layerId);
                 case "boundary": return Boundary(c, a, layerId);
-                default: throw new ToolError("operation must be offset, join or boundary.");
+                case "extend": return GeometryOps.Extend(c, a);
+                case "trim": return GeometryOps.Trim(c, a);
+                case "break": return GeometryOps.Break(c, a);
+                case "fillet": return GeometryOps.Corner(c, a, true);
+                case "chamfer": return GeometryOps.Corner(c, a, false);
+                default: throw new ToolError("operation must be offset, join, boundary, extend, trim, break, fillet or chamfer.");
             }
         }
 

@@ -57,6 +57,23 @@ namespace T3LabCAD.Core
             return item.Result;
         }
 
+        /// <summary>Queue work on the main thread and return at once (UI updates: never waits, never throws).</summary>
+        public void Post(Action action)
+        {
+            try
+            {
+                _control.BeginInvoke((MethodInvoker)(() =>
+                {
+                    try { action(); }
+                    catch (Exception ex) { Log.Error("posted: " + ex); }
+                }));
+            }
+            catch (Exception)
+            {
+                // stopping: nothing to show any more
+            }
+        }
+
         static void StartInApplicationContext<T>(WorkItem<T> item)
         {
             try

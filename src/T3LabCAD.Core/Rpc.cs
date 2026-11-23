@@ -30,7 +30,7 @@ namespace T3LabCAD.Core
                 {
                     case "health": result = Health(); break;
                     case "tools/list": result = Registry.ListJson(); break;
-                    case "tools/call": result = CallTool(p.ReqStr("name"), new Args(p.Raw("arguments"))); break;
+                    case "tools/call": result = CallTool(p.ReqStr("name"), new Args(p.Raw("arguments")), AgentCursors.ClientName(p.Raw("client"))); break;
                     default: return Error(id, -32601, "Unknown method: " + method);
                 }
                 return Json.Write(new Dictionary<string, object> { ["id"] = id, ["result"] = result });
@@ -61,42 +61,114 @@ namespace T3LabCAD.Core
             ["calls"] = Interlocked.Read(ref Entry.CallCount),
         };
 
-        static object CallTool(string name, Args args)
+        static object CallTool(string name, Args args, string client)
         {
             ToolDef def = Registry.Get(name);
             if (def == null) return ErrorResult($"Unknown tool '{name}'.");
             Interlocked.Increment(ref Entry.CallCount);
             var sw = Stopwatch.StartNew();
             string outcome = "ok";
+            // Agent Cursors only records here; it can never fail the call
+            AgentCursors.CurrentAgent = client;
+            AgentStep step = null;
+            try { step = AgentCursors.Begin(def, args, client); }
+            catch (Exception ex) { Log.Error("agent cursors: " + ex.Message); }
+            bool ok = false, refused = false;
+            string error = null;
+            object value = null;
             try
             {
-                object value = def.Background
-                    ? def.Handler(null, args)
-                    : Entry.Main.Run(() => Execute(def, args), applicationContext: def.Kind == ToolKind.App);
+                if (AgentCursors.Blocks(def, args))
+                {
+                    refused = true;
+                    throw new ToolError(AgentCursors.PausedMessage);
+                }
+                bool capture = step != null && AgentCursors.Captures(def);
+                if (def.Background)
+                {
+                    AgentCursors.Capture watch = capture ? OnMainOrNull(() => StartCapture(step)) : null;
+                    try { value = def.Handler(null, args); }
+                    finally { if (watch != null) EndCapture(watch); }
+                }
+                else
+                {
+                    value = Entry.Main.Run(() =>
+                    {
+                        // Pause pressed while this call waited for the main thread
+                        if (AgentCursors.Blocks(def, args))
+                        {
+                            refused = true;
+                            throw new ToolError(AgentCursors.PausedMessage);
+                        }
+                        AgentCursors.Capture watch = null;
+                        if (capture)
+                        {
+                            try { watch = StartCapture(step); }
+                            catch (Exception ex) { Log.Error("agent cursors capture: " + ex.Message); }
+                        }
+                        try { return Execute(def, args); }
+                        finally { watch?.Dispose(); }
+                    }, applicationContext: def.Kind == ToolKind.App);
+                }
+                ok = true;
                 return Success(value);
             }
             catch (ToolError te)
             {
                 outcome = "error: " + te.Message;
+                error = te.Message;
                 return ErrorResult(te.Message);
             }
             catch (AcRx.Exception ae)
             {
                 outcome = "autocad error: " + ae.ErrorStatus;
                 string msg = ae.Message == ae.ErrorStatus.ToString() ? "" : ": " + ae.Message;
-                return ErrorResult($"AutoCAD error {ae.ErrorStatus}{msg}");
+                error = $"AutoCAD error {ae.ErrorStatus}{msg}";
+                return ErrorResult(error);
             }
             catch (Exception ex)
             {
                 outcome = "exception: " + ex.GetType().Name;
                 Log.Error(name + ": " + ex);
-                return ErrorResult($"{ex.GetType().Name}: {ex.Message}");
+                error = $"{ex.GetType().Name}: {ex.Message}";
+                return ErrorResult(error);
             }
             finally
             {
                 Entry.LastCall = $"{name} ({sw.ElapsedMilliseconds} ms)";
                 Log.Info($"{name} {sw.ElapsedMilliseconds}ms {outcome}");
+                try { AgentCursors.End(step, ok, refused, error, value); }
+                catch (Exception ex) { Log.Error("agent cursors: " + ex.Message); }
             }
+        }
+
+        /// <summary>Agent Cursors set-up for a background tool: on the main thread, but never fails or delays the call much.</summary>
+        static T OnMainOrNull<T>(Func<T> fn) where T : class
+        {
+            try { return Entry.Main.Run(fn, 5000); }
+            catch (Exception ex)
+            {
+                Log.Error("agent cursors capture: " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>Ends a background tool's capture; if the main thread is not free, later (Dispose runs once).</summary>
+        static void EndCapture(AgentCursors.Capture watch)
+        {
+            try { Entry.Main.Run(() => { watch.Dispose(); return 0; }, 5000); }
+            catch (Exception ex)
+            {
+                Log.Error("agent cursors capture: " + ex.Message);
+                Entry.Main?.Post(watch.Dispose);
+            }
+        }
+
+        /// <summary>Watch the active drawing for what a writing call creates, changes and erases (Agent Cursors). Main thread.</summary>
+        static AgentCursors.Capture StartCapture(AgentStep step)
+        {
+            Document doc = AcApp.DocumentManager.MdiActiveDocument;
+            return doc == null ? null : new AgentCursors.Capture(step, doc.Database);
         }
 
         static object Execute(ToolDef def, Args args)
@@ -122,6 +194,7 @@ namespace T3LabCAD.Core
                     {
                         ctx.Tr = tr;
                         result = def.Handler(ctx, args);
+                        if (def.Kind == ToolKind.Write && !ctx.NeedsRegen) ctx.NeedsRegen = Acad.AnyInBlockDefinition(doc.Database, tr, args);
                         tr.Commit();
                     }
                 }

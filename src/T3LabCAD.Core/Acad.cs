@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Autodesk.AutoCAD.Colors;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -73,13 +74,48 @@ namespace T3LabCAD.Core
             if (string.IsNullOrWhiteSpace(space) || space.Equals("current", StringComparison.OrdinalIgnoreCase)) return db.CurrentSpaceId;
             if (space.Equals("model", StringComparison.OrdinalIgnoreCase)) return SymbolUtilityServices.GetBlockModelSpaceId(db);
             if (space.Equals("paper", StringComparison.OrdinalIgnoreCase)) return SymbolUtilityServices.GetBlockPaperSpaceId(db);
+            if (space.StartsWith("block:", StringComparison.OrdinalIgnoreCase)) return BlockDefinitionId(db, tr, space.Substring(6).Trim());
             var layouts = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
             foreach (DBDictionaryEntry entry in layouts)
             {
                 if (entry.Key.Equals(space, StringComparison.OrdinalIgnoreCase))
                     return ((Layout)tr.GetObject(entry.Value, OpenMode.ForRead)).BlockTableRecordId;
             }
-            throw new ToolError($"Unknown space '{space}'. Use model, paper, current or a layout name (see list_layouts).");
+            throw new ToolError($"Unknown space '{space}'. Use model, paper, current, a layout name (see list_layouts) or block:NAME.");
+        }
+
+        /// <summary>space "block:NAME": a block definition to edit in place (not a layout, xref or anonymous block).</summary>
+        static ObjectId BlockDefinitionId(Database db, Transaction tr, string name)
+        {
+            var blocks = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            if (name.Length == 0 || !blocks.Has(name)) throw new ToolError($"No block named '{name}' (see list_blocks).");
+            var btr = (BlockTableRecord)tr.GetObject(blocks[name], OpenMode.ForRead);
+            if (btr.IsLayout) throw new ToolError($"'{name}' is a layout: use space=model / paper / the layout name.");
+            if (btr.IsFromExternalReference || btr.IsDependent) throw new ToolError($"'{name}' comes from an xref and cannot be edited here.");
+            if (btr.IsAnonymous) throw new ToolError($"'{name}' is an anonymous block.");
+            return btr.ObjectId;
+        }
+
+        /// <summary>
+        /// A write on these handles touched a block definition (space block:NAME): its inserts only redraw after a regen.
+        /// Erased entities count too (delete_entities). Never throws.
+        /// </summary>
+        public static bool AnyInBlockDefinition(Database db, Transaction tr, Args a)
+        {
+            try
+            {
+                if (!a.Has("handles")) return false;
+                foreach (string h in a.Strs("handles").Take(50))
+                {
+                    if (!long.TryParse((h ?? "").Trim(), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out long value)) continue;
+                    if (!db.TryGetObjectId(new Handle(value), out ObjectId id) || !id.IsValid) continue;
+                    if (tr.GetObject(id, OpenMode.ForRead, true) is Entity e &&
+                        tr.GetObject(e.OwnerId, OpenMode.ForRead) is BlockTableRecord owner && !owner.IsLayout)
+                        return true;
+                }
+            }
+            catch (Exception) { /* only a display question */ }
+            return false;
         }
 
         /// <summary>One space, or every layout (model + paper) for "all".</summary>
