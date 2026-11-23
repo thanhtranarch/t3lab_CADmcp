@@ -39,6 +39,10 @@ namespace T3LabCAD.Loader
         [CommandMethod("T3LAB", "T3MCPRELOAD", CommandFlags.Modal)]
         public void Reload() => Guard(CoreHost.Reload);
 
+        /// <summary>Agent Cursors on / off: the bar (and, if chosen, the pointers on the drawing) that show what AI apps do.</summary>
+        [CommandMethod("T3LAB", "T3CURSORS", CommandFlags.Modal)]
+        public void Cursors() => Guard(() => CoreHost.Write(CoreHost.ToggleAgentCursors()));
+
         static void Guard(System.Action action)
         {
             try { action(); }

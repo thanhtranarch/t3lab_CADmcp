@@ -46,6 +46,7 @@ namespace T3LabCAD.Core
             _server = server;
             AcApp.DocumentManager.DocumentActivated += OnDocumentActivated;
             AcApp.DocumentManager.DocumentDestroyed += OnDocumentDestroyed;
+            AgentCursors.Load();
             Log.Info($"started v{Version} on 127.0.0.1:{server.Port}, {Registry.Count} tools, pid {Process.GetCurrentProcess().Id}");
         }
 
@@ -54,6 +55,8 @@ namespace T3LabCAD.Core
             if (_server == null) return;
             AcApp.DocumentManager.DocumentActivated -= OnDocumentActivated;
             AcApp.DocumentManager.DocumentDestroyed -= OnDocumentDestroyed;
+            try { AgentCursors.Shutdown(); }
+            catch (Exception ex) { Log.Error("agent cursors: " + ex.Message); }
             _server.Stop();
             _server = null;
             Main?.Dispose();
@@ -69,6 +72,13 @@ namespace T3LabCAD.Core
         }
 
         internal static int Port => _server?.Port ?? 0;
+
+        /// <summary>T3CURSORS (Loader command / ribbon): turn Agent Cursors on or off. Main thread; returns the message to show.</summary>
+        public static string ToggleAgentCursors()
+        {
+            if (_server == null) return "T3LabCAD MCP is stopped (T3MCPSTART first).";
+            return AgentCursors.Toggle();
+        }
 
         internal static bool RequestReload()
         {

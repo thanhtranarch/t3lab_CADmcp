@@ -69,6 +69,41 @@
    }
   },
   {
+   "name": "t3lab_narrate",
+   "title": "Show goal and steps",
+   "description": "Tell the user what you are doing in AutoCAD: your goal and task list appear on the T3Lab Agent Cursors bar, the current task is ticked off as you go. Call it at the start of multi-step work (goal + tasks) and with step=N when you move to task N; done=true at the end. Changes nothing in the drawing.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "goal": {
+      "type": "string",
+      "description": "What you are doing, one short line"
+     },
+     "tasks": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "The steps you plan, short (max 8)"
+     },
+     "step": {
+      "type": "integer",
+      "description": "The task you are on now, 1-based"
+     },
+     "done": {
+      "type": "boolean",
+      "description": "All tasks are finished"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Show goal and steps",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "activate_document",
    "title": "Switch drawing",
    "description": "Make another open drawing the active one (all other tools act on the active drawing). Match by full path, file name, or file name without extension.",
