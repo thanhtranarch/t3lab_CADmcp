@@ -33,6 +33,96 @@ namespace T3LabCAD.Core
                     P("height", Int("Image height in pixels (default 800, max 1600)")),
                     P("save_path", Str("Also save the PNG to this path"))),
                 Screenshot, tx: false);
+
+            Registry.Add("save_view", "Save named view", ToolKind.Write,
+                "Save the current view (or the window p1, p2) as a named view of the current space. replace=true overwrites one " +
+                "with the same name. List with list_named_objects kind=view; rename / delete with rename_object / delete_object kind=view.",
+                ObjR("name",
+                    P("name", Str("View name")),
+                    P("p1", Pt("Optional window: first corner")),
+                    P("p2", Pt("Optional window: second corner")),
+                    P("category", Str("View category (for sheet sets)")),
+                    P("replace", Bool("Overwrite an existing view with this name (default false)"))),
+                SaveView);
+
+            Registry.Add("restore_view", "Restore named view", ToolKind.Write,
+                "Show a saved named view. A paper space view needs its layout to be current, a model view needs Model (or a viewport).",
+                ObjR("name", P("name", Str("View name"))),
+                RestoreView);
+        }
+
+        static bool InPaperSpace(Database db) =>
+            !db.TileMode && db.CurrentSpaceId != SymbolUtilityServices.GetBlockModelSpaceId(db);
+
+        static object SaveView(ToolContext c, Args a)
+        {
+            var db = c.Db;
+            var tr = c.Tr;
+            string name = a.ReqStr("name").Trim();
+            Acad.ValidateName(name, "view");
+            var views = (ViewTable)tr.GetObject(db.ViewTableId, OpenMode.ForRead);
+            ViewTableRecord rec;
+            bool created = !views.Has(name);
+            if (!created)
+            {
+                if (!a.Bool("replace", false)) throw new ToolError($"A view named '{name}' already exists. Pass replace=true to overwrite it.");
+                rec = (ViewTableRecord)tr.GetObject(views[name], OpenMode.ForWrite);
+                if (rec.IsDependent) throw new ToolError($"'{name}' comes from an xref.");
+            }
+            else
+            {
+                rec = new ViewTableRecord { Name = name };
+                views.UpgradeOpen();
+                views.Add(rec);
+                tr.AddNewlyCreatedDBObject(rec, true);
+            }
+
+            using (ViewTableRecord current = c.Ed.GetCurrentView())
+            {
+                if (a.Has("p1") || a.Has("p2"))
+                {
+                    Point3d p1 = a.ReqPt("p1"), p2 = a.ReqPt("p2");
+                    FitView(current,
+                        new Point3d(Math.Min(p1.X, p2.X), Math.Min(p1.Y, p2.Y), 0),
+                        new Point3d(Math.Max(p1.X, p2.X), Math.Max(p1.Y, p2.Y), 0), 1.0);
+                }
+                rec.CenterPoint = current.CenterPoint;
+                rec.Height = current.Height;
+                rec.Width = current.Width;
+                rec.Target = current.Target;
+                rec.ViewDirection = current.ViewDirection;
+                rec.ViewTwist = current.ViewTwist;
+                rec.LensLength = current.LensLength;
+                rec.PerspectiveEnabled = current.PerspectiveEnabled;
+            }
+            rec.IsPaperspaceView = InPaperSpace(db);
+            if (rec.IsPaperspaceView) rec.Layout = LayoutManager.Current.GetLayoutId(LayoutManager.Current.CurrentLayout);
+            if (a.Has("category")) rec.CategoryName = a.Str("category") ?? "";
+            return new Dictionary<string, object>
+            {
+                ["view"] = name,
+                ["created"] = created,
+                ["space"] = rec.IsPaperspaceView ? "paper" : "model",
+                ["center"] = Geo.P(rec.CenterPoint),
+                ["width"] = Geo.R(rec.Width),
+                ["height"] = Geo.R(rec.Height),
+            };
+        }
+
+        static object RestoreView(ToolContext c, Args a)
+        {
+            var db = c.Db;
+            string name = a.ReqStr("name").Trim();
+            var views = (ViewTable)c.Tr.GetObject(db.ViewTableId, OpenMode.ForRead);
+            if (!views.Has(name)) throw new ToolError($"No view named '{name}' (see list_named_objects kind=view).");
+            var rec = (ViewTableRecord)c.Tr.GetObject(views[name], OpenMode.ForRead);
+            bool paper = InPaperSpace(db);
+            if (rec.IsPaperspaceView && !paper)
+                throw new ToolError($"'{name}' is a paper space view: make its layout current first (activate_layout).");
+            if (!rec.IsPaperspaceView && paper)
+                throw new ToolError($"'{name}' is a model space view: activate_layout Model first.");
+            c.Ed.SetCurrentView(rec);
+            return new Dictionary<string, object> { ["restored"] = name, ["space"] = rec.IsPaperspaceView ? "paper" : "model" };
         }
 
         static object Zoom(ToolContext c, Args a)
@@ -86,20 +176,26 @@ namespace T3LabCAD.Core
         {
             using (ViewTableRecord view = ed.GetCurrentView())
             {
-                Matrix3d wcsToDcs =
-                    (Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) *
-                     Matrix3d.Displacement(view.Target - Point3d.Origin) *
-                     Matrix3d.PlaneToWorld(view.ViewDirection)).Inverse();
-                var ext = new Extents3d(min, max);
-                ext.TransformBy(wcsToDcs);
-                double w = Math.Max(ext.MaxPoint.X - ext.MinPoint.X, 1e-6);
-                double h = Math.Max(ext.MaxPoint.Y - ext.MinPoint.Y, 1e-6);
-                double ratio = view.Width / view.Height;
-                view.CenterPoint = new Point2d((ext.MinPoint.X + ext.MaxPoint.X) / 2, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2);
-                if (w / h > ratio) { view.Width = w * margin; view.Height = w * margin / ratio; }
-                else { view.Height = h * margin; view.Width = h * margin * ratio; }
+                FitView(view, min, max, margin);
                 ed.SetCurrentView(view);
             }
+        }
+
+        /// <summary>Center the view on the WCS box min..max (in its own DCS), keeping the window aspect ratio.</summary>
+        static void FitView(ViewTableRecord view, Point3d min, Point3d max, double margin)
+        {
+            Matrix3d wcsToDcs =
+                (Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) *
+                 Matrix3d.Displacement(view.Target - Point3d.Origin) *
+                 Matrix3d.PlaneToWorld(view.ViewDirection)).Inverse();
+            var ext = new Extents3d(min, max);
+            ext.TransformBy(wcsToDcs);
+            double w = Math.Max(ext.MaxPoint.X - ext.MinPoint.X, 1e-6);
+            double h = Math.Max(ext.MaxPoint.Y - ext.MinPoint.Y, 1e-6);
+            double ratio = view.Width / view.Height;
+            view.CenterPoint = new Point2d((ext.MinPoint.X + ext.MaxPoint.X) / 2, (ext.MinPoint.Y + ext.MaxPoint.Y) / 2);
+            if (w / h > ratio) { view.Width = w * margin; view.Height = w * margin / ratio; }
+            else { view.Height = h * margin; view.Width = h * margin * ratio; }
         }
 
         static object Screenshot(ToolContext c, Args a)

@@ -69,6 +69,15 @@ namespace T3LabCAD.Core
                     P("mode", Enum("convert, keep or delete", "convert", "keep", "delete")),
                     P("description", Str("Block description"))),
                 CreateBlock);
+
+            Registry.Add("explode_entities", "Explode", ToolKind.Write,
+                "Explode entities into their parts in the same space: block inserts, polylines, dimensions, multiline text, hatches, " +
+                "regions... Block attributes become plain text with their values (attributes_as_text, default true; false = like " +
+                "EXPLODE, attribute definitions showing the tags). Returns the new handles.",
+                ObjR("handles", Handles,
+                    P("attributes_as_text", Bool("Block inserts: turn attribute values into text (default true)")),
+                    P("keep_original", Bool("Keep the original entities (default false)"))),
+                Explode);
         }
 
         // ---------------------------------------------------------------- add_entities
@@ -700,6 +709,111 @@ namespace T3LabCAD.Core
                 ["mode"] = mode,
                 ["insert_handle"] = insertHandle,
             };
+        }
+
+        // ---------------------------------------------------------------- explode
+
+        static object Explode(ToolContext c, Args a)
+        {
+            var tr = c.Tr;
+            bool attributesAsText = a.Bool("attributes_as_text", true);
+            bool keep = a.Bool("keep_original", false);
+            var newHandles = new List<object>();
+            var errors = new List<object>();
+            int exploded = 0;
+            foreach (string h in a.Strs("handles"))
+            {
+                var parts = new DBObjectCollection();
+                var created = new List<Entity>();
+                try
+                {
+                    var e = tr.GetObject(Acad.Id(c.Db, h), OpenMode.ForRead) as Entity ?? throw new ToolError("not an entity");
+                    if (e is BlockReference xr && ((BlockTableRecord)tr.GetObject(xr.BlockTableRecord, OpenMode.ForRead)).IsFromExternalReference)
+                        throw new ToolError("this is an xref: bind it first (manage_xref action=insert), then explode the insert.");
+                    e.Explode(parts);
+                    if (!keep) e.UpgradeOpen(); // fails on a locked layer before anything is added
+                    var space = (BlockTableRecord)tr.GetObject(e.OwnerId, OpenMode.ForWrite);
+                    foreach (DBObject part in parts)
+                    {
+                        if (!(part is Entity pe)) continue;
+                        if (attributesAsText && e is BlockReference && pe is AttributeDefinition ad)
+                        {
+                            // values come from the insert's attributes below; constant ones keep their text
+                            if (ad.Constant && !ad.Invisible) created.Add(TextFrom(ad));
+                            continue;
+                        }
+                        created.Add(pe);
+                    }
+                    if (attributesAsText && e is BlockReference br)
+                    {
+                        foreach (ObjectId aid in br.AttributeCollection)
+                        {
+                            if (!(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar) || ar.Invisible || ar.IsErased) continue;
+                            if (string.IsNullOrEmpty(ar.TextString)) continue;
+                            if (ar.IsMTextAttribute)
+                            {
+                                MText m = ar.MTextAttribute;
+                                m.SetPropertiesFrom(ar);
+                                created.Add(m);
+                            }
+                            else created.Add(TextFrom(ar));
+                        }
+                    }
+                    foreach (Entity ne in created)
+                    {
+                        Acad.Append(space, ne, tr);
+                        newHandles.Add(ne.Handle.ToString());
+                    }
+                    if (!keep) e.Erase();
+                    exploded++;
+                }
+                catch (ToolError te) { errors.Add(new Dictionary<string, object> { ["handle"] = h, ["error"] = te.Message }); }
+                catch (AcRx.Exception ae)
+                {
+                    string why = ae.ErrorStatus == AcRx.ErrorStatus.NotApplicable ? "this entity type cannot be exploded"
+                        : ae.ErrorStatus == AcRx.ErrorStatus.OnLockedLayer ? "entity is on a locked layer"
+                        : "AutoCAD error " + ae.ErrorStatus;
+                    errors.Add(new Dictionary<string, object> { ["handle"] = h, ["error"] = why });
+                }
+                finally
+                {
+                    // pieces not added to the drawing (skipped, or the explode failed half way)
+                    foreach (DBObject part in parts.Cast<DBObject>().Concat(created))
+                        if (part.ObjectId.IsNull && !part.IsDisposed) part.Dispose();
+                }
+            }
+            var result = new Dictionary<string, object>
+            {
+                ["exploded"] = exploded,
+                ["new_count"] = newHandles.Count,
+                ["new_handles"] = newHandles.Take(1000).ToList(),
+            };
+            if (newHandles.Count > 1000) result["handles_not_listed"] = newHandles.Count - 1000;
+            if (errors.Count > 0) result["errors"] = errors;
+            if (exploded == 0 && errors.Count > 0) throw new ToolError("Nothing was exploded: " + Json.Write(errors));
+            return result;
+        }
+
+        /// <summary>A plain TEXT with the look and position of an attribute (reference or definition).</summary>
+        static DBText TextFrom(DBText source)
+        {
+            var t = new DBText();
+            t.SetPropertiesFrom(source);
+            t.TextString = source.TextString;
+            t.TextStyleId = source.TextStyleId;
+            t.Height = source.Height;
+            t.WidthFactor = source.WidthFactor;
+            t.Oblique = source.Oblique;
+            t.Rotation = source.Rotation;
+            t.Normal = source.Normal;
+            t.Thickness = source.Thickness;
+            t.IsMirroredInX = source.IsMirroredInX;
+            t.IsMirroredInY = source.IsMirroredInY;
+            t.HorizontalMode = source.HorizontalMode;
+            t.VerticalMode = source.VerticalMode;
+            t.Position = source.Position;
+            if (!Acad.IsDefaultJustified(source)) t.AlignmentPoint = source.AlignmentPoint;
+            return t;
         }
     }
 }

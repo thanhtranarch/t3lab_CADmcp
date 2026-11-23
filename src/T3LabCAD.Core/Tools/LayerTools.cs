@@ -40,7 +40,7 @@ namespace T3LabCAD.Core
                 DeleteLayer, destructive: true);
         }
 
-        static object ListLayers(ToolContext c, Args a)
+        internal static object ListLayers(ToolContext c, Args a)
         {
             var tr = c.Tr;
             string filter = a.Str("name");
@@ -152,24 +152,29 @@ namespace T3LabCAD.Core
             return new Dictionary<string, object> { ["layer"] = layer.Name, ["created"] = created, ["changed"] = changed };
         }
 
-        static object DeleteLayer(ToolContext c, Args a)
+        static object DeleteLayer(ToolContext c, Args a) => DeleteLayerCore(c, a.ReqStr("name"), a.Str("merge_into"));
+
+        /// <summary>Shared by delete_layer and delete_object kind=layer.</summary>
+        internal static Dictionary<string, object> DeleteLayerCore(ToolContext c, string name, string target)
         {
             var db = c.Db;
             var tr = c.Tr;
-            string name = a.ReqStr("name");
             if (name == "0" || name.Equals("Defpoints", StringComparison.OrdinalIgnoreCase))
                 throw new ToolError($"Layer '{name}' cannot be deleted.");
             var table = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
             if (!table.Has(name)) throw new ToolError($"Layer '{name}' does not exist.");
             ObjectId id = table[name];
             if (db.Clayer == id) throw new ToolError("The current layer cannot be deleted. Make another layer current first.");
+            if (((LayerTableRecord)tr.GetObject(id, OpenMode.ForRead)).IsDependent)
+                throw new ToolError($"'{name}' comes from an xref: it goes away when the xref is detached (manage_xref).");
 
             int moved = 0;
-            string target = a.Str("merge_into");
             if (target != null)
             {
                 if (target.Equals(name, StringComparison.OrdinalIgnoreCase)) throw new ToolError("merge_into must be a different layer.");
                 ObjectId targetId = Acad.EnsureLayer(db, tr, target);
+                if (((LayerTableRecord)tr.GetObject(targetId, OpenMode.ForRead)).IsDependent)
+                    throw new ToolError($"merge_into '{target}' is an xref layer: pick a layer of this drawing.");
                 ((LayerTableRecord)tr.GetObject(id, OpenMode.ForWrite)).IsLocked = false;
                 var blocks = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                 foreach (ObjectId btrId in blocks)

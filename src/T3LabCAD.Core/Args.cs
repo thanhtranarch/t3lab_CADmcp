@@ -56,11 +56,15 @@ namespace T3LabCAD.Core
         public bool Bool(string key, bool def)
         {
             var v = Raw(key);
-            if (v == null) return def;
+            return v == null ? def : ToBool(v, key);
+        }
+
+        public static bool ToBool(object v, string key)
+        {
             if (v is bool b) return b;
             string s = Convert.ToString(v, CultureInfo.InvariantCulture).Trim().ToLowerInvariant();
-            if (s == "true" || s == "1" || s == "yes") return true;
-            if (s == "false" || s == "0" || s == "no") return false;
+            if (s == "true" || s == "1" || s == "yes" || s == "on") return true;
+            if (s == "false" || s == "0" || s == "no" || s == "off") return false;
             throw new ToolError($"Argument '{key}' must be true or false.");
         }
 

@@ -20,18 +20,26 @@ namespace T3LabCAD.Core
                 ObjR("document", P("document", Str("Drawing name or path, see get_status"))), Activate, needsDocument: false);
 
             Registry.Add("open_document", "Open drawing", ToolKind.App,
-                "Open a .dwg (or .dxf) file in AutoCAD and make it active. If it is already open it is just activated.",
-                ObjR("path", P("path", Str("Full path of the file")), P("read_only", Bool("Open read-only (default false)"))),
+                "Open a .dwg (or .dxf) file in AutoCAD and make it active. If it is already open it is just activated. " +
+                "A name without folder is looked up next to the active drawing (list_drawing_files finds drawings).",
+                ObjR("path", P("path", Str("Path of the file (.dwg added when there is no extension)")), P("read_only", Bool("Open read-only (default false)"))),
                 Open, needsDocument: false);
 
             Registry.Add("new_document", "New drawing", ToolKind.App,
-                "Create a new drawing from a template (default acadiso.dwt, metric) and make it active.",
-                Obj(P("template", Str("Template file name or path, e.g. acadiso.dwt or acad.dwt"))), New, needsDocument: false);
+                "Create a new drawing from a template (default acadiso.dwt, metric) and make it active. save_as also saves it to a .dwg right away.",
+                Obj(P("template", Str("Template file name or path, e.g. acadiso.dwt or acad.dwt")),
+                    P("save_as", Str("Optional .dwg path to save the new drawing to (must not exist)"))),
+                New, needsDocument: false);
 
             Registry.Add("save_document", "Save drawing", ToolKind.App,
                 "Save the active drawing. No path: save in place. A .dwg path: Save As (the drawing is renamed). " +
-                "A .dxf path: export a DXF copy (the open drawing keeps its name).",
-                Obj(P("path", Str("Optional target path (.dwg or .dxf)"))), Save);
+                "A .dxf path: export a DXF copy (the open drawing keeps its name). copy=true with a .dwg path: write a copy and keep " +
+                "working on the original (needs no unsaved changes). version saves in an older format: 2018 (2018-2027), 2013, 2010, 2007, 2004, 2000.",
+                Obj(P("path", Str("Optional target path (.dwg or .dxf)")),
+                    P("copy", Bool("Save a copy to path; the open drawing keeps its name (default false)")),
+                    P("version", Enum("File format (default: the current format)", "2018", "2013", "2010", "2007", "2004", "2000")),
+                    P("overwrite", Bool("copy: replace an existing file at path (default false)"))),
+                Save);
 
             Registry.Add("close_document", "Close drawing", ToolKind.App,
                 "Close a drawing (default: the active one). Refuses when there are unsaved changes unless save=true or discard_changes=true.",
@@ -76,11 +84,76 @@ namespace T3LabCAD.Core
             return new Dictionary<string, object> { ["active"] = DocInfo(d) };
         }
 
+        /// <summary>
+        /// Full path for a file argument: quotes trimmed, a bare or relative name is taken next to the
+        /// active drawing, defaultExt added when there is no extension.
+        /// </summary>
+        internal static string ResolvePath(string path, string defaultExt = null)
+        {
+            path = (path ?? "").Trim().Trim('"');
+            if (path.Length == 0) throw new ToolError("The path is empty.");
+            if (!Path.IsPathRooted(path))
+            {
+                Document active = AcApp.DocumentManager.MdiActiveDocument;
+                if (active == null || !active.IsNamedDrawing)
+                    throw new ToolError($"'{path}' is not a full path, and there is no saved active drawing to take its folder from.");
+                path = Path.Combine(Path.GetDirectoryName(active.Name), path);
+            }
+            if (defaultExt != null && Path.GetExtension(path).Length == 0) path += defaultExt;
+            try { return Path.GetFullPath(path); }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                throw new ToolError($"Invalid path '{path}': {ex.Message}");
+            }
+        }
+
+        /// <summary>"2018" (also 2019-2027: same format), "2013", ... -> the file format year, or null for the current format.</summary>
+        static int? FormatYear(string version)
+        {
+            if (string.IsNullOrWhiteSpace(version)) return null;
+            string s = version.Trim().ToLowerInvariant();
+            if (s == "current" || s == "native" || s == "latest") return null;
+            string digits = new string(s.Where(char.IsDigit).ToArray());
+            if (!int.TryParse(digits, out int year) || year < 2000 || year > 2100)
+                throw new ToolError($"Unknown version '{version}'. Use 2018, 2013, 2010, 2007, 2004 or 2000.");
+            foreach (int f in new[] { 2018, 2013, 2010, 2007, 2004, 2000 })
+                if (year >= f) return f;
+            return 2000;
+        }
+
+        internal static DwgVersion DwgVersionOf(string version)
+        {
+            switch (FormatYear(version))
+            {
+                case null: return DwgVersion.Current;
+                case 2018: return DwgVersion.AC1032;
+                case 2013: return DwgVersion.AC1027;
+                case 2010: return DwgVersion.AC1024;
+                case 2007: return DwgVersion.AC1021;
+                case 2004: return DwgVersion.AC1800;
+                default: return DwgVersion.AC1015;
+            }
+        }
+
+        /// <summary>ActiveX AcSaveAsType for a .dwg of that format year (ac2018_dwg = 64 ... ac2000_dwg = 12).</summary>
+        static int SaveAsType(int year)
+        {
+            switch (year)
+            {
+                case 2018: return 64;
+                case 2013: return 60;
+                case 2010: return 48;
+                case 2007: return 36;
+                case 2004: return 24;
+                default: return 12;
+            }
+        }
+
         static object Open(ToolContext c, Args a)
         {
-            string path = a.ReqStr("path");
-            if (!File.Exists(path)) throw new ToolError($"File not found: {path}");
-            Document existing = Find(Path.GetFullPath(path));
+            string path = ResolvePath(a.ReqStr("path"), ".dwg");
+            if (!File.Exists(path)) throw new ToolError($"File not found: {path}. list_drawing_files shows the drawings in a folder.");
+            Document existing = Find(path);
             if (existing != null)
             {
                 AcApp.DocumentManager.MdiActiveDocument = existing;
@@ -93,6 +166,13 @@ namespace T3LabCAD.Core
         static object New(ToolContext c, Args a)
         {
             string template = a.Str("template");
+            string saveAs = a.Has("save_as") ? ResolvePath(a.ReqStr("save_as"), ".dwg") : null;
+            if (saveAs != null)
+            {
+                if (!saveAs.EndsWith(".dwg", StringComparison.OrdinalIgnoreCase)) throw new ToolError("save_as must be a .dwg path.");
+                if (File.Exists(saveAs)) throw new ToolError($"{saveAs} already exists. Use open_document to open it, or pick another name.");
+                if (!Directory.Exists(Path.GetDirectoryName(saveAs))) throw new ToolError($"Folder not found: {Path.GetDirectoryName(saveAs)}");
+            }
             Document d;
             if (!string.IsNullOrEmpty(template)) d = AcApp.DocumentManager.Add(template);
             else
@@ -100,31 +180,69 @@ namespace T3LabCAD.Core
                 try { d = AcApp.DocumentManager.Add("acadiso.dwt"); }
                 catch (AcRx.Exception) { d = AcApp.DocumentManager.Add("acad.dwt"); }
             }
+            if (saveAs != null)
+            {
+                dynamic acadDoc = d.GetAcadDocument();
+                acadDoc.SaveAs(saveAs);
+            }
             return new Dictionary<string, object> { ["created"] = DocInfo(d) };
         }
 
         static object Save(ToolContext c, Args a)
         {
             Document doc = c.Doc;
-            string path = a.Str("path");
+            string path = a.Has("path") ? ResolvePath(a.ReqStr("path"), ".dwg") : null;
+            int? year = FormatYear(a.Str("version"));
+            string format = year?.ToString() ?? "current";
             if (path != null && path.EndsWith(".dxf", StringComparison.OrdinalIgnoreCase))
             {
-                using (doc.LockDocument()) doc.Database.DxfOut(path, 16, DwgVersion.Current);
-                return new Dictionary<string, object> { ["exported"] = path, ["format"] = "dxf" };
+                using (doc.LockDocument()) doc.Database.DxfOut(path, 16, DwgVersionOf(a.Str("version")));
+                return new Dictionary<string, object> { ["exported"] = path, ["format"] = "dxf", ["version"] = format };
             }
+            if (path != null && !path.EndsWith(".dwg", StringComparison.OrdinalIgnoreCase))
+                throw new ToolError("path must end with .dwg or .dxf.");
+            if (a.Bool("copy", false)) return SaveCopy(doc, path, a.Str("version"), format, a.Bool("overwrite", false));
 
             dynamic acadDoc = doc.GetAcadDocument();
             if (string.IsNullOrEmpty(path))
             {
                 if (!doc.IsNamedDrawing) throw new ToolError("This drawing has never been saved: pass a .dwg path.");
-                if (doc.IsReadOnly) throw new ToolError("The drawing is open read-only: pass a new .dwg path to save a copy.");
-                acadDoc.Save();
+                if (doc.IsReadOnly) throw new ToolError("The drawing is open read-only: pass a new .dwg path, or copy=true with a path.");
+                if (year == null) acadDoc.Save();
+                else acadDoc.SaveAs(doc.Name, SaveAsType(year.Value));
             }
             else
             {
-                acadDoc.SaveAs(path);
+                if (year == null) acadDoc.SaveAs(path);
+                else acadDoc.SaveAs(path, SaveAsType(year.Value));
             }
-            return new Dictionary<string, object> { ["saved"] = doc.Name };
+            return new Dictionary<string, object> { ["saved"] = doc.Name, ["version"] = format };
+        }
+
+        /// <summary>A copy of the saved file (converted through a side database when another format is asked).</summary>
+        static object SaveCopy(Document doc, string path, string version, string format, bool overwrite)
+        {
+            if (string.IsNullOrEmpty(path)) throw new ToolError("copy=true needs a target .dwg path.");
+            if (!doc.IsNamedDrawing) throw new ToolError("This drawing has never been saved: save it with a path first (or export a .dxf copy).");
+            dynamic acadDoc = doc.GetAcadDocument();
+            if (!(bool)acadDoc.Saved)
+                throw new ToolError("The drawing has unsaved changes and a copy is made from the file on disk. Save first (save_document), then copy.");
+            if (string.Equals(path, doc.Name, StringComparison.OrdinalIgnoreCase)) throw new ToolError("The copy must have another path than the drawing.");
+            if (Find(path) != null) throw new ToolError($"{path} is open in AutoCAD: close it first.");
+            if (File.Exists(path) && !overwrite) throw new ToolError($"{path} already exists. Pass overwrite=true to replace it.");
+            if (!Directory.Exists(Path.GetDirectoryName(path))) throw new ToolError($"Folder not found: {Path.GetDirectoryName(path)}");
+
+            if (FormatYear(version) == null) File.Copy(doc.Name, path, true);
+            else
+            {
+                using (var side = new Database(false, true))
+                {
+                    side.ReadDwgFile(doc.Name, FileOpenMode.OpenForReadAndAllShare, true, "");
+                    side.CloseInput(true);
+                    side.SaveAs(path, DwgVersionOf(version));
+                }
+            }
+            return new Dictionary<string, object> { ["copied_to"] = path, ["from"] = doc.Name, ["version"] = format };
         }
 
         static object Close(ToolContext c, Args a)
@@ -152,7 +270,7 @@ namespace T3LabCAD.Core
             return new Dictionary<string, object> { ["closed"] = closed, ["saved"] = save, ["discarded_changes"] = unsaved && !save };
         }
 
-        static object ListLayouts(ToolContext c, Args a)
+        internal static object ListLayouts(ToolContext c, Args a)
         {
             var layouts = (DBDictionary)c.Tr.GetObject(c.Db.LayoutDictionaryId, OpenMode.ForRead);
             string current = LayoutManager.Current.CurrentLayout;

@@ -39,7 +39,7 @@ Script sẽ:
 4. Thêm server `t3lab-autocad` vào `claude_desktop_config.json` (có backup). Thêm `-ClaudeCode` để đăng ký cho Claude Code CLI (`claude mcp add --scope user`).
 
 Sau đó **khởi động lại Claude Desktop**. Trong AutoCAD gõ `T3MCPSTATUS` để kiểm tra:
-`T3LabCAD MCP v1.0.0: listening on 127.0.0.1:48900 | 27 tools | ...`
+`T3LabCAD MCP v1.2.0: listening on 127.0.0.1:48900 | 47 tools | ...`
 
 Nếu AutoCAD đang mở lúc cài lần đầu: khởi động lại AutoCAD, hoặc `NETLOAD` file `T3LabCAD.Loader.dll` trong thư mục bundle.
 
@@ -48,15 +48,36 @@ Nếu AutoCAD đang mở lúc cài lần đầu: khởi động lại AutoCAD, h
 | Nhóm | Tool |
 |---|---|
 | Trạng thái | `get_status`, `get_sysvars`, `set_sysvar` |
-| Bản vẽ | `open_document`, `new_document`, `activate_document`, `save_document` (dwg / xuất dxf), `close_document`, `list_layouts`, `activate_layout` |
+| Bản vẽ | `open_document` (tên không có thư mục = cạnh bản vẽ đang mở), `new_document` (`save_as`), `activate_document`, `save_document` (dwg / xuất dxf, `copy=true` lưu bản sao, `version` 2018/2013/2010/2007/2004/2000), `close_document` |
+| File | `list_drawing_files` (duyệt thư mục, đánh dấu file đang mở), `rename_document` (đổi tên file, bản vẽ đang mở được đóng → đổi tên → mở lại), `delete_drawing_file` (vào Recycle Bin, trừ khi `permanent=true`) |
+| Layout | `list_layouts`, `activate_layout`, `create_layout` (mới hoặc copy từ layout khác), `add_viewport` (vùng model + tỉ lệ 1:100) |
+| Export / publish | `export_pdf` (plot layout của bản vẽ đang mở ra PDF / DWFx / DWF: 1 file nhiều trang hoặc mỗi layout 1 file; đổi khổ giấy, ctb, vùng in, tỉ lệ; `list_options` liệt kê máy in, khổ giấy, ctb), `publish_pdf` (gộp layout của nhiều bản vẽ, kể cả file đang đóng, vào 1 PDF theo page setup). DXF: `save_document path=*.dxf`; ảnh PNG: `screenshot` |
 | Layer | `list_layers`, `set_layer` (tạo/sửa/đổi tên/on/freeze/lock/current), `delete_layer` (có `merge_into`) |
+| Style / linetype | `set_text_style` (font TrueType hoặc SHX, height, width factor, oblique), `set_dim_style` (tạo từ style gốc, đặt mọi biến DIM*, tự cập nhật dim), `load_linetype` (từ acadiso.lin, có wildcard) |
+| Đối tượng có tên | `list_named_objects`, `rename_object`, `delete_object`, `purge` — cho layer, block, layout, text_style, dim_style, linetype, view, ucs, group, mleader_style, table_style (xref chỉ list) |
+| Group / view / xref | `set_group` (tạo, thêm/bớt entity), `save_view`, `restore_view`, `attach_xref` (attach/overlay, đường dẫn tương đối), `manage_xref` (detach/reload/unload/bind/insert/repath) |
 | Đọc | `query_entities` (lọc theo type, layer, block, text, vùng chọn, handle; phân trang), `get_texts` (TEXT/MTEXT/ATTRIB/MLEADER), `list_blocks`, `selection` |
-| Vẽ / sửa | `add_entities` (line, polyline, rectangle, circle, arc, ellipse, point, text, mtext, insert + attribute, dim_aligned, dim_linear, hatch, spline), `update_entities`, `delete_entities`, `transform_entities` (move/copy/rotate/scale/mirror), `create_block` |
+| Vẽ / sửa | `add_entities` (line, polyline, rectangle, circle, arc, ellipse, point, text, mtext, insert + attribute, dim_aligned, dim_linear, hatch, spline), `update_entities`, `delete_entities`, `transform_entities` (move/copy/rotate/scale/mirror), `create_block`, `explode_entities` (attribute → text giữ giá trị) |
 | Xem | `zoom`, `screenshot` (ảnh PNG cho Claude xem) |
 | Lệnh | `run_command` (gửi dòng lệnh AutoCAD, chờ xong, báo đối tượng mới tạo, tự Esc nếu lệnh còn treo), `cancel_command`, `reload_addin` |
 | Bridge | `list_autocad_instances`, `switch_autocad_instance` |
 
-An toàn: server chỉ nghe `127.0.0.1`. `run_command` từ chối AutoLISP (`(`, `!`) và các lệnh nạp/chạy code hoặc mở chương trình khác (SHELL, NETLOAD, APPLOAD, SCRIPT, VBARUN...). Tool ghi bị từ chối khi người dùng đang ở giữa một lệnh. `close_document` không đóng bản vẽ chưa lưu trừ khi `save=true` hoặc `discard_changes=true`.
+Tạo / đổi tên / xoá theo loại đối tượng:
+
+| Loại | Tạo | Đổi tên | Xoá |
+|---|---|---|---|
+| File bản vẽ | `new_document save_as`, `save_document` | `rename_document` | `delete_drawing_file` |
+| Layer | `set_layer` | `set_layer new_name` / `rename_object` | `delete_layer` / `delete_object` / `purge` |
+| Block | `create_block`, `add_entities insert block_file` | `rename_object` | `delete_object` (`erase_references`) / `purge` |
+| Layout | `create_layout` | `rename_object` | `delete_object` |
+| Text / dim style | `set_text_style`, `set_dim_style` | `new_name` / `rename_object` | `delete_object` / `purge` |
+| Linetype | `load_linetype` | `rename_object` | `delete_object` / `purge` |
+| View | `save_view` | `rename_object` | `delete_object` |
+| Group | `set_group` | `rename_object` | `delete_object` (ungroup) |
+| Xref | `attach_xref` | — (không đổi tên xref: layer/style của nó giữ tên cũ) | `manage_xref detach` |
+| Entity | `add_entities` | — | `delete_entities` |
+
+An toàn: server chỉ nghe `127.0.0.1`. `run_command` từ chối AutoLISP (`(`, `!`) và các lệnh nạp/chạy code hoặc mở chương trình khác (SHELL, NETLOAD, APPLOAD, SCRIPT, VBARUN...). Tool ghi bị từ chối khi người dùng đang ở giữa một lệnh. `close_document` không đóng bản vẽ chưa lưu trừ khi `save=true` hoặc `discard_changes=true`; `rename_document` cũng vậy (`save_changes=true`). `delete_drawing_file` chỉ xoá file AutoCAD (.dwg, .dxf, .dwt, .dws, .bak, .sv$) không đang mở, mặc định vào Recycle Bin. `delete_object` / `purge` không xoá đối tượng còn đang dùng, layer 0, style Standard hay đối tượng current; `purge dry_run=true` chỉ báo cáo.
 
 ## Phát triển
 
@@ -65,7 +86,11 @@ Thêm tool: tạo method trong `src/T3LabCAD.Core/Tools/*.cs` và `Registry.Add(
 - `Write` — khoá document, transaction tự commit khi trả về / rollback khi lỗi = 1 bước Undo.
 - `App` — mở/đóng/chuyển bản vẽ, chạy trong application context của AutoCAD (`ExecuteInApplicationContext`). Lưu ý: code chạy ở document context mà đổi bản vẽ active sẽ bị treo tới khi bản vẽ cũ được active lại.
 
-`bridge/tools_snapshot.json` là danh sách tool gửi cho Claude khi AutoCAD chưa mở; cập nhật từ `%APPDATA%\T3LabCAD\tools_cache.json` sau khi thêm tool.
+`bridge/tools_snapshot.json` là danh sách tool gửi cho Claude khi AutoCAD chưa mở. Sau khi thêm/sửa tool, tạo lại từ mã nguồn (không cần AutoCAD; CI kiểm tra bằng `--check`):
+
+```bash
+python -I scripts/gen_tools_snapshot.py
+```
 
 Cập nhật khi AutoCAD đang mở:
 

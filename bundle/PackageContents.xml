@@ -8,7 +8,7 @@
                     ProductType="Application"
                     Name="T3Lab CAD MCP"
                     Description="MCP server inside AutoCAD: lets Claude read and edit the open drawing."
-                    AppVersion="1.1.2"
+                    AppVersion="1.2.0"
                     Author="T3Lab"
                     ProductCode="{CAFE7E02-09EC-491D-80C6-E1FC82276248}"
                     UpgradeCode="{D3291EDA-AF1C-460D-8934-1A18738D05EC}">

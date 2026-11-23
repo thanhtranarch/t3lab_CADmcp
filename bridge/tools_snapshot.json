@@ -94,13 +94,13 @@
   {
    "name": "open_document",
    "title": "Open drawing",
-   "description": "Open a .dwg (or .dxf) file in AutoCAD and make it active. If it is already open it is just activated.",
+   "description": "Open a .dwg (or .dxf) file in AutoCAD and make it active. If it is already open it is just activated. A name without folder is looked up next to the active drawing (list_drawing_files finds drawings).",
    "inputSchema": {
     "type": "object",
     "properties": {
      "path": {
       "type": "string",
-      "description": "Full path of the file"
+      "description": "Path of the file (.dwg added when there is no extension)"
      },
      "read_only": {
       "type": "boolean",
@@ -121,13 +121,17 @@
   {
    "name": "new_document",
    "title": "New drawing",
-   "description": "Create a new drawing from a template (default acadiso.dwt, metric) and make it active.",
+   "description": "Create a new drawing from a template (default acadiso.dwt, metric) and make it active. save_as also saves it to a .dwg right away.",
    "inputSchema": {
     "type": "object",
     "properties": {
      "template": {
       "type": "string",
       "description": "Template file name or path, e.g. acadiso.dwt or acad.dwt"
+     },
+     "save_as": {
+      "type": "string",
+      "description": "Optional .dwg path to save the new drawing to (must not exist)"
      }
     }
    },
@@ -141,13 +145,33 @@
   {
    "name": "save_document",
    "title": "Save drawing",
-   "description": "Save the active drawing. No path: save in place. A .dwg path: Save As (the drawing is renamed). A .dxf path: export a DXF copy (the open drawing keeps its name).",
+   "description": "Save the active drawing. No path: save in place. A .dwg path: Save As (the drawing is renamed). A .dxf path: export a DXF copy (the open drawing keeps its name). copy=true with a .dwg path: write a copy and keep working on the original (needs no unsaved changes). version saves in an older format: 2018 (2018-2027), 2013, 2010, 2007, 2004, 2000.",
    "inputSchema": {
     "type": "object",
     "properties": {
      "path": {
       "type": "string",
       "description": "Optional target path (.dwg or .dxf)"
+     },
+     "copy": {
+      "type": "boolean",
+      "description": "Save a copy to path; the open drawing keeps its name (default false)"
+     },
+     "version": {
+      "type": "string",
+      "enum": [
+       "2018",
+       "2013",
+       "2010",
+       "2007",
+       "2004",
+       "2000"
+      ],
+      "description": "File format (default: the current format)"
+     },
+     "overwrite": {
+      "type": "boolean",
+      "description": "copy: replace an existing file at path (default false)"
      }
     }
    },
@@ -219,6 +243,359 @@
    },
    "annotations": {
     "title": "Switch layout",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "list_drawing_files",
+   "title": "Find drawing files",
+   "description": "List drawing files in a folder (default: the folder of the active drawing, else Documents), with size, modified time and whether each is open in AutoCAD. Also lists subfolders, to browse before open_document.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "folder": {
+      "type": "string",
+      "description": "Folder to list (default: folder of the active drawing)"
+     },
+     "pattern": {
+      "type": "string",
+      "description": "File pattern(s), ; separated (default *.dwg), e.g. *.dwg;*.dxf"
+     },
+     "recursive": {
+      "type": "boolean",
+      "description": "Include subfolders (default false)"
+     },
+     "sort": {
+      "type": "string",
+      "enum": [
+       "name",
+       "modified"
+      ],
+      "description": "name (default) or modified (newest first)"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max files returned (default 300, max 2000)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Find drawing files",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "rename_document",
+   "title": "Rename drawing file",
+   "description": "Rename a drawing file on disk. An open drawing is closed, renamed and opened again (refused when it has unsaved changes unless save_changes=true). new_name is a file name (same folder) or a full path; the extension stays. Xrefs and sheet sets that point at the old name are not updated.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "document": {
+      "type": "string",
+      "description": "Open drawing to rename (name or path, default the active drawing)"
+     },
+     "path": {
+      "type": "string",
+      "description": "Or: a drawing file on disk"
+     },
+     "new_name": {
+      "type": "string",
+      "description": "New file name, e.g. A-101.dwg, or a full path"
+     },
+     "save_changes": {
+      "type": "boolean",
+      "description": "Save unsaved changes before renaming (default false)"
+     },
+     "reopen": {
+      "type": "boolean",
+      "description": "Open the renamed drawing again when it was open (default true)"
+     }
+    },
+    "required": [
+     "new_name"
+    ]
+   },
+   "annotations": {
+    "title": "Rename drawing file",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "delete_drawing_file",
+   "title": "Delete drawing file",
+   "description": "Delete a drawing file (.dwg, .dxf, .dwt, .dws, .bak, .sv$) that is not open. Goes to the Recycle Bin unless permanent=true; on network or removable drives (no Recycle Bin) permanent=true is required.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "File to delete"
+     },
+     "permanent": {
+      "type": "boolean",
+      "description": "Delete for good instead of the Recycle Bin (default false)"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "annotations": {
+    "title": "Delete drawing file",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "create_layout",
+   "title": "Create layout",
+   "description": "Create a paper space layout (sheet), empty or as a copy of another layout (page setup, title block, viewports). Rename / delete layouts with rename_object / delete_object kind=layout.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "New layout name"
+     },
+     "copy_from": {
+      "type": "string",
+      "description": "Copy this layout (default: new empty layout)"
+     },
+     "activate": {
+      "type": "boolean",
+      "description": "Make it the current layout (default false)"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Create layout",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "add_viewport",
+   "title": "Add viewport",
+   "description": "Add a viewport to a paper space layout showing part of model space (the layout becomes current). Paper rectangle: corner1 + corner2 in paper units (default: the layout limits, 5% margin). Model area: view_window [[x1, y1], [x2, y2]] (fitted) or view_center. scale = paper units per model unit: 0.01 or 1:100.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "layout": {
+      "type": "string",
+      "description": "Paper space layout name"
+     },
+     "corner1": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Paper: first corner of the viewport"
+     },
+     "corner2": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Paper: opposite corner"
+     },
+     "view_window": {
+      "type": "array",
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "description": "Model: [[x1, y1], [x2, y2]] area to show"
+     },
+     "view_center": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Model: point at the viewport center"
+     },
+     "scale": {
+      "description": "Viewport scale, e.g. 1:100, 1/50 or 0.01 (default: fit view_window or the model extents)"
+     },
+     "layer": {
+      "type": "string",
+      "description": "Layer for the viewport (created if missing)"
+     },
+     "locked": {
+      "type": "boolean",
+      "description": "Lock the display (default false)"
+     }
+    },
+    "required": [
+     "layout"
+    ]
+   },
+   "annotations": {
+    "title": "Add viewport",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "export_pdf",
+   "title": "Export to PDF",
+   "description": "Plot layouts of the active drawing to PDF (or DWFx / DWF): one multi-sheet file, or one file per layout. Uses each layout page setup; paper, plot_style, area, scale, center and rotation override it. Model space defaults to its extents, fit to the paper. list_options=true lists plotters, paper sizes and plot styles instead.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "layouts": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layouts to plot, * = every paper layout in tab order, Model = model space (default: the current layout)"
+     },
+     "path": {
+      "type": "string",
+      "description": "Output file (separate_files: output folder). Default: next to the drawing, named after it"
+     },
+     "separate_files": {
+      "type": "boolean",
+      "description": "One file per layout, named DRAWING-LAYOUT (default false: one multi-sheet file)"
+     },
+     "format": {
+      "type": "string",
+      "enum": [
+       "pdf",
+       "dwfx",
+       "dwf"
+      ],
+      "description": "Output format (default pdf)"
+     },
+     "plotter": {
+      "type": "string",
+      "description": "Plotter .pc3 (default: the page setup one if it makes this format, else DWG To PDF.pc3)"
+     },
+     "paper": {
+      "type": "string",
+      "description": "Paper size: canonical name or a part of it, e.g. A3, A1, ISO_full_bleed_A1 (default: page setup)"
+     },
+     "plot_style": {
+      "type": "string",
+      "description": "Plot style table, e.g. monochrome.ctb (default: page setup)"
+     },
+     "area": {
+      "type": "string",
+      "enum": [
+       "layout",
+       "extents",
+       "display",
+       "limits",
+       "window"
+      ],
+      "description": "What to plot (default: page setup; Model: extents)"
+     },
+     "window": {
+      "type": "array",
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "description": "area=window: [[x1, y1], [x2, y2]]"
+     },
+     "scale": {
+      "description": "fit, or paper:drawing units like 1:100 (default: page setup; fit when area changes)"
+     },
+     "center": {
+      "type": "boolean",
+      "description": "Center on the paper"
+     },
+     "rotation": {
+      "type": "string",
+      "enum": [
+       "0",
+       "90",
+       "180",
+       "270"
+      ],
+      "description": "Plot rotation in degrees"
+     },
+     "list_options": {
+      "type": "boolean",
+      "description": "Only list plotters, paper sizes (of plotter) and plot styles; plot nothing"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Export to PDF",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "publish_pdf",
+   "title": "Publish to PDF",
+   "description": "Publish layouts of one or more drawings (open, or files on disk) into one multi-sheet PDF (or DWFx / DWF), like PUBLISH. Each sheet uses its own page setup, or page_setup (a named page setup from page_setup_file) for all. Open drawings should be saved first: sheets may come from the file on disk.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "drawings": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Drawing paths or open drawing names (default: the active drawing)"
+     },
+     "layouts": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layout names, wildcards allowed (default * = every paper layout, in tab order)"
+     },
+     "path": {
+      "type": "string",
+      "description": "Output file (default: next to the first drawing, named after it)"
+     },
+     "format": {
+      "type": "string",
+      "enum": [
+       "pdf",
+       "dwfx",
+       "dwf"
+      ],
+      "description": "Output format (default pdf)"
+     },
+     "page_setup": {
+      "type": "string",
+      "description": "Named page setup to use for every sheet"
+     },
+     "page_setup_file": {
+      "type": "string",
+      "description": "Drawing or template that holds page_setup (default: each drawing)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Publish to PDF",
     "readOnlyHint": false,
     "destructiveHint": false,
     "openWorldHint": false
@@ -341,6 +718,387 @@
     "title": "Delete layer",
     "readOnlyHint": false,
     "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "set_text_style",
+   "title": "Create or edit text style",
+   "description": "Create a text style (if missing) and/or change it: font (a TrueType typeface like Arial, a .ttf file, or an .shx like romans.shx), bigfont (.shx for Asian text), height (0 = set per text), width_factor, oblique angle, bold / italic (TrueType), rename, make current. Texts using the style update. List with list_named_objects kind=text_style.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Text style name"
+     },
+     "create": {
+      "type": "boolean",
+      "description": "Create the style when it does not exist (default true; it starts as a copy of the current style)"
+     },
+     "new_name": {
+      "type": "string",
+      "description": "Rename the style"
+     },
+     "font": {
+      "type": "string",
+      "description": "Arial, arial.ttf, romans.shx..."
+     },
+     "bigfont": {
+      "type": "string",
+      "description": "Big font .shx (SHX fonts only), empty to remove"
+     },
+     "bold": {
+      "type": "boolean",
+      "description": "TrueType bold"
+     },
+     "italic": {
+      "type": "boolean",
+      "description": "TrueType italic"
+     },
+     "height": {
+      "type": "number",
+      "description": "Fixed text height, 0 = variable (default 0 for a new style)"
+     },
+     "width_factor": {
+      "type": "number",
+      "description": "Width factor (default 1)"
+     },
+     "oblique": {
+      "type": "number",
+      "description": "Oblique angle in degrees, -85 to 85"
+     },
+     "make_current": {
+      "type": "boolean",
+      "description": "Make it the current text style"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Create or edit text style",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "set_dim_style",
+   "title": "Create or edit dimension style",
+   "description": "Create a dimension style (copy of base, default the current style) and/or change its DIM variables, e.g. props {DIMSCALE: 100, DIMTXT: 2.5, DIMASZ: 2.5, DIMEXE: 1.25, DIMEXO: 0.625, DIMGAP: 0.625, DIMDEC: 0, DIMTAD: 1, DIMTXSTY: Standard, DIMBLK: _ARCHTICK, DIMCLRD: 1, DIMLUNIT: 2, DIMLFAC: 1}. Dimensions using the style are updated. Read all variables with list_named_objects kind=dim_style full=true.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Dimension style name"
+     },
+     "create": {
+      "type": "boolean",
+      "description": "Create the style when it does not exist (default true)"
+     },
+     "base": {
+      "type": "string",
+      "description": "New style: copy settings from this style (default current)"
+     },
+     "props": {
+      "type": "object",
+      "description": "DIM variables to set: name (DIMTXT or Dimtxt) -> value"
+     },
+     "new_name": {
+      "type": "string",
+      "description": "Rename the style"
+     },
+     "make_current": {
+      "type": "boolean",
+      "description": "Make it the current dimension style"
+     },
+     "update_dimensions": {
+      "type": "boolean",
+      "description": "Recompute dimensions that use the style (default true)"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Create or edit dimension style",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "load_linetype",
+   "title": "Load linetypes",
+   "description": "Load linetypes from a .lin file (default acadiso.lin, else acad.lin). names accepts wildcards (DASH*, *). Without names, lists the linetypes in the file and whether each is loaded.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Linetype names, wildcards allowed (default: only list the file)"
+     },
+     "file": {
+      "type": "string",
+      "description": "Linetype file name or path (default acadiso.lin)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Load linetypes",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "list_named_objects",
+   "title": "List named objects",
+   "description": "Named objects of the active drawing by kind: text_style (font, height, width factor), dim_style (main DIM variables, full=true for all), linetype, view, ucs, group (entity handles), mleader_style, table_style, xref (path and status: loaded, unloaded, not_found...). layer, block and layout return the same as list_layers, list_blocks and list_layouts.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "layer",
+       "block",
+       "layout",
+       "text_style",
+       "dim_style",
+       "linetype",
+       "view",
+       "ucs",
+       "group",
+       "mleader_style",
+       "table_style",
+       "xref"
+      ],
+      "description": "Kind of object"
+     },
+     "name": {
+      "type": "string",
+      "description": "Wildcard filter, e.g. A-*"
+     },
+     "full": {
+      "type": "boolean",
+      "description": "dim_style: every DIM variable; group: every handle (default false)"
+     },
+     "include_xref": {
+      "type": "boolean",
+      "description": "Include xref-dependent styles / linetypes (NAME|...) (default false)"
+     },
+     "include_anonymous": {
+      "type": "boolean",
+      "description": "group: include unnamed groups (default false)"
+     }
+    },
+    "required": [
+     "kind"
+    ]
+   },
+   "annotations": {
+    "title": "List named objects",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "rename_object",
+   "title": "Rename named object",
+   "description": "Rename a layer, block, layout, text style, dimension style, linetype, named view, UCS, group, multileader style or table style. Layer 0 / Defpoints, Model, Standard styles, ByLayer / ByBlock / Continuous and xref-dependent names (XREF|NAME) cannot be renamed.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "layer",
+       "block",
+       "layout",
+       "text_style",
+       "dim_style",
+       "linetype",
+       "view",
+       "ucs",
+       "group",
+       "mleader_style",
+       "table_style"
+      ],
+      "description": "Kind of object"
+     },
+     "name": {
+      "type": "string",
+      "description": "Current name"
+     },
+     "new_name": {
+      "type": "string",
+      "description": "New name"
+     }
+    },
+    "required": [
+     "kind",
+     "name",
+     "new_name"
+    ]
+   },
+   "annotations": {
+    "title": "Rename named object",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "delete_object",
+   "title": "Delete named object",
+   "description": "Delete named objects of one kind; each name succeeds or fails on its own (results say why). Objects still in use are refused: layer: merge_into moves its entities to another layer first; block: erase_references=true also erases its inserts; layout: Model and the last paper layout stay; group: ungroups (the entities stay). Layer 0, Standard styles and current objects cannot be deleted. Xrefs: manage_xref detach. Unused objects in bulk: purge.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "layer",
+       "block",
+       "layout",
+       "text_style",
+       "dim_style",
+       "linetype",
+       "view",
+       "ucs",
+       "group",
+       "mleader_style",
+       "table_style"
+      ],
+      "description": "Kind of object"
+     },
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Exact names to delete (no wildcards)"
+     },
+     "merge_into": {
+      "type": "string",
+      "description": "layer: layer that receives the entities"
+     },
+     "erase_references": {
+      "type": "boolean",
+      "description": "block: also erase every insert of the block (default false)"
+     }
+    },
+    "required": [
+     "kind",
+     "names"
+    ]
+   },
+   "annotations": {
+    "title": "Delete named object",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "purge",
+   "title": "Purge unused",
+   "description": "Remove unused named objects like PURGE: blocks, layers, linetypes, text / dimension / multileader / table styles and registered applications (regapp). Repeats for nested items (a purged block can free a layer). dry_run=true only reports.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "kinds": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "block",
+        "layer",
+        "linetype",
+        "text_style",
+        "dim_style",
+        "mleader_style",
+        "table_style",
+        "regapp"
+       ]
+      },
+      "description": "Kinds to purge (default all)"
+     },
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Only these names, wildcards allowed (default all)"
+     },
+     "dry_run": {
+      "type": "boolean",
+      "description": "Report what would be purged, change nothing (default false)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Purge unused",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "set_group",
+   "title": "Create or edit group",
+   "description": "Create a named group of entities (if missing) and/or edit it: add handles, remove_handles, description, selectable. List with list_named_objects kind=group; ungroup with delete_object kind=group (entities stay).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Group name"
+     },
+     "create": {
+      "type": "boolean",
+      "description": "Create the group when it does not exist (default true)"
+     },
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "remove_handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entities to take out of the group"
+     },
+     "description": {
+      "type": "string",
+      "description": "Group description"
+     },
+     "selectable": {
+      "type": "boolean",
+      "description": "Selecting one member selects the whole group (default true)"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Create or edit group",
+    "readOnlyHint": false,
+    "destructiveHint": false,
     "openWorldHint": false
    }
   },
@@ -822,6 +1580,143 @@
    }
   },
   {
+   "name": "explode_entities",
+   "title": "Explode",
+   "description": "Explode entities into their parts in the same space: block inserts, polylines, dimensions, multiline text, hatches, regions... Block attributes become plain text with their values (attributes_as_text, default true; false = like EXPLODE, attribute definitions showing the tags). Returns the new handles.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "attributes_as_text": {
+      "type": "boolean",
+      "description": "Block inserts: turn attribute values into text (default true)"
+     },
+     "keep_original": {
+      "type": "boolean",
+      "description": "Keep the original entities (default false)"
+     }
+    },
+    "required": [
+     "handles"
+    ]
+   },
+   "annotations": {
+    "title": "Explode",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "attach_xref",
+   "title": "Attach xref",
+   "description": "Attach (or overlay) a .dwg as an external reference and insert it. The path is stored relative to this drawing when relative_path=true and both are on the same drive.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "space": {
+      "type": "string",
+      "description": "model, paper, current (default) or a layout name"
+     },
+     "path": {
+      "type": "string",
+      "description": "Drawing to reference (.dwg)"
+     },
+     "name": {
+      "type": "string",
+      "description": "Xref name (default: file name)"
+     },
+     "position": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Insertion point (default [0, 0])"
+     },
+     "scale": {
+      "type": "number",
+      "description": "Uniform scale (default 1)"
+     },
+     "rotation": {
+      "type": "number",
+      "description": "Rotation in degrees (default 0)"
+     },
+     "overlay": {
+      "type": "boolean",
+      "description": "Overlay instead of attach: not seen when this drawing is itself referenced (default false)"
+     },
+     "relative_path": {
+      "type": "boolean",
+      "description": "Store a relative path (default false)"
+     },
+     "layer": {
+      "type": "string",
+      "description": "Layer for the xref insert (created if missing)"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "annotations": {
+    "title": "Attach xref",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "manage_xref",
+   "title": "Manage xrefs",
+   "description": "Act on attached xrefs by name (see list_named_objects kind=xref): detach (remove it and all its inserts), reload, unload, bind (make it a normal block, names become XREF$0$NAME), insert (bind with plain names), repath (new_path, then reload).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Xref names"
+     },
+     "action": {
+      "type": "string",
+      "enum": [
+       "detach",
+       "reload",
+       "unload",
+       "bind",
+       "insert",
+       "repath"
+      ],
+      "description": "What to do"
+     },
+     "new_path": {
+      "type": "string",
+      "description": "repath: the new file path"
+     }
+    },
+    "required": [
+     "names",
+     "action"
+    ]
+   },
+   "annotations": {
+    "title": "Manage xrefs",
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "zoom",
    "title": "Zoom",
    "description": "Zoom the current view: extents (everything), window {p1, p2}, handles (fit these entities), or center {center, height}.",
@@ -916,6 +1811,78 @@
    "annotations": {
     "title": "Screenshot",
     "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "save_view",
+   "title": "Save named view",
+   "description": "Save the current view (or the window p1, p2) as a named view of the current space. replace=true overwrites one with the same name. List with list_named_objects kind=view; rename / delete with rename_object / delete_object kind=view.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "View name"
+     },
+     "p1": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Optional window: first corner"
+     },
+     "p2": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Optional window: second corner"
+     },
+     "category": {
+      "type": "string",
+      "description": "View category (for sheet sets)"
+     },
+     "replace": {
+      "type": "boolean",
+      "description": "Overwrite an existing view with this name (default false)"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Save named view",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "restore_view",
+   "title": "Restore named view",
+   "description": "Show a saved named view. A paper space view needs its layout to be current, a model view needs Model (or a viewport).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "View name"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   },
+   "annotations": {
+    "title": "Restore named view",
+    "readOnlyHint": false,
     "destructiveHint": false,
     "openWorldHint": false
    }
