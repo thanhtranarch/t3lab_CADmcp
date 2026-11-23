@@ -454,6 +454,16 @@ def annotation_checks(c):
     r, d = c.call("query_entities", handles=[table], detail="full")
     check("table cell replaced", ok(r) and d["entities"][0]["cells"][2][0] == "Phòng khách", d)
 
+    # formatting codes survive: the match is on the visible text, \\P and {\\H...;} stay as they are
+    r, d = c.call("add_entities", items=[{"type": "mtext", "position": [0, -14000], "text": "Bàn\\P{\\H1.5x;ghế} A", "height": 50}])
+    mt = d["created"][0]["handle"] if ok(r) else None
+    r, d = c.call("replace_text", find="ghế", replace="tủ", types=["mtext"])
+    check("replace_text in formatted MTEXT", ok(r) and d["changed_entities"] == 1, d)
+    r, d = c.call("query_entities", handles=[mt], detail="full")
+    check("MTEXT codes kept", ok(r) and d["entities"][0]["contents"] == "Bàn\\P{\\H1.5x;tủ} A", d)
+    r, d = c.call("replace_text", find="A", replace="B", types=["mtext"], whole_word=True, dry_run=True)
+    check("codes not matched ('A' only once, not in \\H)", ok(r) and d["total_matches"] == 1, d)
+
     r, d = c.call("add_entities", items=[{"type": "rectangle", "corner1": [5000, -9000], "corner2": [5400, -8700]},
                                          {"type": "attdef", "position": [5050, -8900], "tag": "ROOM", "prompt": "Room name",
                                           "default": "P01", "height": 60}])

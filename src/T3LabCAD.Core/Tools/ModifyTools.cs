@@ -72,7 +72,8 @@ namespace T3LabCAD.Core
             public readonly Dictionary<string, int> Matches = new Dictionary<string, int>();
             public readonly List<object> Samples = new List<object>();
             public readonly HashSet<ObjectId> Changed = new HashSet<ObjectId>();
-            public int LockedSkipped, FormattingSkipped;
+            public readonly HashSet<ObjectId> Locked = new HashSet<ObjectId>();
+            public readonly HashSet<ObjectId> Formatting = new HashSet<ObjectId>();
             public readonly Dictionary<ObjectId, bool> LockedLayers = new Dictionary<ObjectId, bool>();
         }
 
@@ -115,32 +116,35 @@ namespace T3LabCAD.Core
             {
                 foreach (ObjectId id in (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead))
                 {
-                    if (!(tr.GetObject(id, OpenMode.ForRead) is Entity e)) continue;
+                    if (id.IsErased || !(tr.GetObject(id, OpenMode.ForRead) is Entity e)) continue;
                     if (!Wild.Any(e.Layer, layers)) continue;
                     try
                     {
                         switch (e)
                         {
                             case AttributeDefinition ad when kinds.Contains("attribute"):
-                                Apply(st, tr, ad, "attribute", ad.TextString, v => ad.TextString = v);
+                                Apply(st, tr, ad, "attribute", ad.TextString, ad.IsMTextAttributeDefinition, v => ad.TextString = v);
                                 break;
                             case DBText t when !(t is AttributeDefinition) && kinds.Contains("text"):
-                                Apply(st, tr, t, "text", t.TextString, v => t.TextString = v);
+                                Apply(st, tr, t, "text", t.TextString, false, v => t.TextString = v);
                                 break;
                             case MText m when kinds.Contains("mtext"):
-                                if (!Apply(st, tr, m, "mtext", m.Contents, v => m.Contents = v) && st.Rx.IsMatch(m.Text ?? ""))
-                                    st.FormattingSkipped++;
+                                Apply(st, tr, m, "mtext", m.Contents, true, v => m.Contents = v);
                                 break;
                             case Dimension d when kinds.Contains("dimension") && !string.IsNullOrEmpty(d.DimensionText):
-                                Apply(st, tr, d, "dimension", d.DimensionText, v => d.DimensionText = v);
+                                Apply(st, tr, d, "dimension", d.DimensionText, true, v => d.DimensionText = v);
                                 break;
-                            case MLeader ml when kinds.Contains("mleader") && ml.ContentType == ContentType.MTextContent && ml.MText != null:
-                                Apply(st, tr, ml, "mleader", ml.MText.Contents, v =>
+                            case MLeader ml when kinds.Contains("mleader") && ml.ContentType == ContentType.MTextContent:
+                                // MLeader.MText hands out a copy on every read: read it once, give it back, dispose it
+                                using (MText copy = ml.MText)
                                 {
-                                    MText copy = ml.MText;
-                                    copy.Contents = v;
-                                    ml.MText = copy;
-                                });
+                                    if (copy == null) break;
+                                    Apply(st, tr, ml, "mleader", copy.Contents, true, v =>
+                                    {
+                                        copy.Contents = v;
+                                        ml.MText = copy;
+                                    });
+                                }
                                 break;
                             case Table tb when kinds.Contains("table"):
                                 bool any = false;
@@ -148,15 +152,15 @@ namespace T3LabCAD.Core
                                     for (int col = 0; col < tb.Columns.Count; col++)
                                     {
                                         int rr = r, cc = col;
-                                        if (Apply(st, tr, tb, "table", tb.Cells[rr, cc].TextString ?? "", v => tb.Cells[rr, cc].TextString = v)) any = true;
+                                        if (Apply(st, tr, tb, "table", tb.Cells[rr, cc].TextString ?? "", true, v => tb.Cells[rr, cc].TextString = v)) any = true;
                                     }
                                 if (any && !st.DryRun) tb.GenerateLayout();
                                 break;
                             case BlockReference br when kinds.Contains("attribute"):
                                 foreach (ObjectId aid in br.AttributeCollection)
                                 {
-                                    if (!(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar) || ar.IsErased) continue;
-                                    Apply(st, tr, ar, "attribute", ar.TextString, v =>
+                                    if (aid.IsErased || !(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar)) continue;
+                                    Apply(st, tr, ar, "attribute", ar.TextString, ar.IsMTextAttribute, v =>
                                     {
                                         ar.TextString = v;
                                         if (ar.IsMTextAttribute) ar.UpdateMTextAttribute();
@@ -180,26 +184,31 @@ namespace T3LabCAD.Core
                 [st.DryRun ? "would_change_entities" : "changed_entities"] = st.Changed.Count,
                 ["samples"] = st.Samples,
             };
-            if (st.LockedSkipped > 0) result["skipped_on_locked_layers"] = st.LockedSkipped;
-            if (st.FormattingSkipped > 0) result["mtext_not_changed_formatting"] = st.FormattingSkipped;
+            if (st.Locked.Count > 0) result["skipped_on_locked_layers"] = st.Locked.Count;
+            if (st.Formatting.Count > 0) result["matches_split_by_formatting"] = st.Formatting.Count;
             if (!st.DryRun && st.Changed.Count > 0) c.NeedsRegen = true;
             return result;
         }
 
-        /// <summary>Replace in one text value; returns true when it matched (and was changed, unless dry run or locked).</summary>
-        static bool Apply(ReplaceState st, Transaction tr, Entity owner, string kind, string text, Action<string> set)
+        /// <summary>
+        /// Replace in one text value. formatted: the value is MTEXT contents (codes such as \P, {\fArial;...}, \H2.5x;):
+        /// the search runs on the visible text and only matches made of plain characters are replaced.
+        /// Returns true when something was (or, on a dry run, would be) changed.
+        /// </summary>
+        static bool Apply(ReplaceState st, Transaction tr, Entity owner, string kind, string text, bool formatted, Action<string> set)
         {
             text = text ?? "";
-            int n = st.Rx.Matches(text).Count;
-            if (n == 0) return false;
-            string after = st.Rx.Replace(text, st.Replacement);
-            if (after == text) return false;
+            int replaced;
+            bool split;
+            string after = formatted ? ReplaceFormatted(st, text, out replaced, out split) : ReplacePlain(st, text, out replaced, out split);
+            if (split) st.Formatting.Add(owner.ObjectId);
+            if (replaced == 0 || after == text) return false;
             if (IsLocked(st, tr, owner.LayerId))
             {
-                st.LockedSkipped++;
+                st.Locked.Add(owner.ObjectId);
                 return false;
             }
-            st.Matches[kind] = (st.Matches.TryGetValue(kind, out int m) ? m : 0) + n;
+            st.Matches[kind] = (st.Matches.TryGetValue(kind, out int m) ? m : 0) + replaced;
             if (st.Samples.Count < st.Limit)
                 st.Samples.Add(new Dictionary<string, object>
                 {
@@ -215,6 +224,146 @@ namespace T3LabCAD.Core
                 set(after);
             }
             return true;
+        }
+
+        static string ReplacePlain(ReplaceState st, string text, out int replaced, out bool split)
+        {
+            split = false;
+            int n = 0;
+            string after = st.Rx.Replace(text, match =>
+            {
+                if (match.Length == 0) return match.Value;
+                n++;
+                return match.Result(st.Replacement);
+            });
+            replaced = n;
+            return after;
+        }
+
+        /// <summary>Visible text of MTEXT contents; for each visible character its range in the contents.</summary>
+        sealed class MTextMap
+        {
+            public readonly System.Text.StringBuilder Visible = new System.Text.StringBuilder();
+            public readonly List<int> Start = new List<int>(), Length = new List<int>();
+            public readonly List<bool> Replaceable = new List<bool>();
+
+            public void Add(char visible, int start, int length, bool replaceable)
+            {
+                Visible.Append(visible);
+                Start.Add(start);
+                Length.Add(length);
+                Replaceable.Add(replaceable);
+            }
+        }
+
+        static bool IsHex(string s, int from, int count)
+        {
+            if (from + count > s.Length) return false;
+            for (int i = from; i < from + count; i++)
+                if (!Uri.IsHexDigit(s[i])) return false;
+            return true;
+        }
+
+        static MTextMap MapMText(string raw)
+        {
+            var map = new MTextMap();
+            int i = 0;
+            while (i < raw.Length)
+            {
+                char ch = raw[i];
+                if (ch == '{' || ch == '}') { i++; continue; } // grouping
+                if (ch == '\\' && i + 1 < raw.Length)
+                {
+                    char k = raw[i + 1];
+                    switch (k)
+                    {
+                        case '\\':
+                        case '{':
+                        case '}':
+                            map.Add(k, i, 2, true); // escaped literal
+                            i += 2;
+                            continue;
+                        case 'P':
+                        case 'N':
+                        case 'X':
+                            map.Add('\n', i, 2, false); // paragraph / column break: a word boundary, never replaced
+                            i += 2;
+                            continue;
+                        case '~':
+                            map.Add(' ', i, 2, true); // non-breaking space
+                            i += 2;
+                            continue;
+                        case 'L':
+                        case 'l':
+                        case 'O':
+                        case 'o':
+                        case 'K':
+                        case 'k':
+                            i += 2; // underline / overline / strike on-off
+                            continue;
+                        case 'U':
+                            if (i + 2 < raw.Length && raw[i + 2] == '+' && IsHex(raw, i + 3, 4))
+                            {
+                                map.Add((char)Convert.ToInt32(raw.Substring(i + 3, 4), 16), i, 7, true);
+                                i += 7;
+                                continue;
+                            }
+                            break;
+                        case 'M':
+                            if (i + 3 < raw.Length && raw[i + 2] == '+' && IsHex(raw, i + 4, 4))
+                            {
+                                i += 8; // \M+nXXXX double-byte character: left alone
+                                continue;
+                            }
+                            break;
+                        default:
+                            if ("fFHWQTACcpS".IndexOf(k) >= 0)
+                            {
+                                int end = raw.IndexOf(';', i + 2);
+                                i = end < 0 ? raw.Length : end + 1; // \f...; \H...; \S...; and the like
+                                continue;
+                            }
+                            break;
+                    }
+                }
+                map.Add(ch, i, 1, true);
+                i++;
+            }
+            return map;
+        }
+
+        static string EscapeMText(string s) =>
+            s.Replace("\\", "\\\\").Replace("{", "\\{").Replace("}", "\\}").Replace("\r\n", "\\P").Replace("\n", "\\P");
+
+        static string ReplaceFormatted(ReplaceState st, string raw, out int replaced, out bool split)
+        {
+            replaced = 0;
+            split = false;
+            MTextMap map = MapMText(raw);
+            string visible = map.Visible.ToString();
+            var edits = new List<Tuple<int, int, string>>();
+            foreach (Match match in st.Rx.Matches(visible))
+            {
+                if (match.Length == 0) continue;
+                int first = match.Index, last = match.Index + match.Length - 1;
+                bool plain = true;
+                for (int i = first; i <= last && plain; i++)
+                {
+                    if (!map.Replaceable[i]) plain = false;
+                    else if (i < last && map.Start[i] + map.Length[i] != map.Start[i + 1]) plain = false; // a code sits inside the match
+                }
+                if (!plain) { split = true; continue; }
+                edits.Add(Tuple.Create(map.Start[first], map.Start[last] + map.Length[last], EscapeMText(match.Result(st.Replacement))));
+            }
+            if (edits.Count == 0) return raw;
+            var sb = new System.Text.StringBuilder(raw);
+            for (int i = edits.Count - 1; i >= 0; i--)
+            {
+                sb.Remove(edits[i].Item1, edits[i].Item2 - edits[i].Item1);
+                sb.Insert(edits[i].Item1, edits[i].Item3);
+            }
+            replaced = edits.Count;
+            return sb.ToString();
         }
 
         static string Clip(string s) => s.Length <= 200 ? s : s.Substring(0, 200) + "...";
@@ -278,11 +427,9 @@ namespace T3LabCAD.Core
                 try
                 {
                     if (!(c.Tr.GetObject(id, OpenMode.ForRead) is Curve curve)) throw new ToolError("not a curve");
-                    var plus = curve.GetOffsetCurves(distance).Cast<DBObject>().ToList();
-                    var minus = curve.GetOffsetCurves(-distance).Cast<DBObject>().ToList();
-                    made.AddRange(plus);
-                    made.AddRange(minus);
-                    List<DBObject> keep = both ? made : Nearer(plus, minus, side.Value);
+                    // each side on its own: a circle offset inward by more than its radius fails, the outward side still works
+                    List<DBObject> plus = OffsetSide(curve, distance, made), minus = OffsetSide(curve, -distance, made);
+                    List<DBObject> keep = both ? plus.Concat(minus).ToList() : Nearer(plus, minus, side.Value);
                     if (keep.Count == 0) throw new ToolError("this curve cannot be offset by that distance");
                     var space = (BlockTableRecord)c.Tr.GetObject(curve.OwnerId, OpenMode.ForWrite);
                     foreach (Entity e in keep.OfType<Entity>())
@@ -301,7 +448,22 @@ namespace T3LabCAD.Core
             return result;
         }
 
-        /// <summary>The offset result whose curves pass closer to the side point.</summary>
+        /// <summary>Offset curves on one side; empty when AutoCAD cannot offset that way. Every result is tracked in made (disposed later unless added).</summary>
+        static List<DBObject> OffsetSide(Curve curve, double distance, List<DBObject> made)
+        {
+            try
+            {
+                var result = curve.GetOffsetCurves(distance).Cast<DBObject>().ToList();
+                made.AddRange(result);
+                return result;
+            }
+            catch (AcRx.Exception)
+            {
+                return new List<DBObject>();
+            }
+        }
+
+        /// <summary>The offset result whose curves pass closer to the side point (an empty side never wins).</summary>
         static List<DBObject> Nearer(List<DBObject> plus, List<DBObject> minus, Point3d side)
         {
             double Dist(List<DBObject> set) => set.OfType<Curve>().Select(cv =>
@@ -309,6 +471,8 @@ namespace T3LabCAD.Core
                 try { return cv.GetClosestPointTo(side, false).DistanceTo(side); }
                 catch (AcRx.Exception) { return double.MaxValue; }
             }).DefaultIfEmpty(double.MaxValue).Min();
+            if (plus.Count == 0) return minus;
+            if (minus.Count == 0) return plus;
             return Dist(plus) <= Dist(minus) ? plus : minus;
         }
 
@@ -394,7 +558,8 @@ namespace T3LabCAD.Core
 
         static object Boundary(ToolContext c, Args a, ObjectId layerId)
         {
-            Point3d seed = a.ReqPt("point");
+            // TraceBoundary takes the seed in the current UCS; the API speaks WCS
+            Point3d seed = a.ReqPt("point").TransformBy(c.Ed.CurrentUserCoordinateSystem.Inverse());
             DBObjectCollection loops = c.Ed.TraceBoundary(seed, a.Bool("islands", true));
             var objects = loops.Cast<DBObject>().ToList();
             try
@@ -455,8 +620,10 @@ namespace T3LabCAD.Core
                         .Where(d => !d.Constant).ToList();
                     var existing = new Dictionary<string, AttributeReference>(StringComparer.OrdinalIgnoreCase);
                     foreach (ObjectId aid in br.AttributeCollection)
-                        if (tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar && !ar.IsErased && !existing.ContainsKey(ar.Tag))
+                        if (!aid.IsErased && tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar && !existing.ContainsKey(ar.Tag))
                             existing[ar.Tag] = ar;
+                    // an attribute can sit on its own (locked) layer: leave the whole insert alone then
+                    if (existing.Values.Any(x => IsLocked(lockedCache, tr, x.LayerId))) { locked++; inserts--; continue; }
 
                     foreach (AttributeDefinition def in defs)
                     {

@@ -195,10 +195,16 @@ namespace T3LabCAD.Core
                     break;
 
                 case MLeader ml:
-                    if (ml.ContentType == ContentType.MTextContent && ml.MText != null)
+                    if (ml.ContentType == ContentType.MTextContent)
                     {
-                        d["text"] = ml.MText.Text;
-                        d["position"] = P(ml.MText.Location);
+                        using (MText copy = ml.MText) // a new copy on every read
+                        {
+                            if (copy != null)
+                            {
+                                d["text"] = copy.Text;
+                                d["position"] = P(copy.Location);
+                            }
+                        }
                     }
                     else d["content"] = ml.ContentType.ToString();
                     break;

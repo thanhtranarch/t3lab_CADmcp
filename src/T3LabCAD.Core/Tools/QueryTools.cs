@@ -215,14 +215,15 @@ namespace T3LabCAD.Core
                     case MText m:
                         Add(TextItem(m.Handle, "MTEXT", m.Layer, m.Text, m.Location, m.TextHeight), m.Location);
                         break;
-                    case MLeader ml when ml.ContentType == ContentType.MTextContent && ml.MText != null:
-                        Add(TextItem(ml.Handle, "MULTILEADER", ml.Layer, ml.MText.Text, ml.MText.Location, ml.MText.TextHeight), ml.MText.Location);
+                    case MLeader ml when ml.ContentType == ContentType.MTextContent:
+                        using (MText copy = ml.MText) // a new copy on every read
+                            if (copy != null) Add(TextItem(ml.Handle, "MULTILEADER", ml.Layer, copy.Text, copy.Location, copy.TextHeight), copy.Location);
                         break;
                     case BlockReference br:
                         string block = null;
                         foreach (ObjectId aid in br.AttributeCollection)
                         {
-                            if (!(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar)) continue;
+                            if (aid.IsErased || !(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar)) continue;
                             block = block ?? Acad.EffectiveName(br, tr);
                             Point3d at = Acad.TextPoint(ar);
                             var item = TextItem(ar.Handle, "ATTRIB", ar.Layer, ar.TextString, at, ar.Height);

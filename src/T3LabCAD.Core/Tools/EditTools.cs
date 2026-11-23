@@ -43,7 +43,7 @@ namespace T3LabCAD.Core
                 "Props: layer, color, linetype, lineweight, text, height, rotation, position, start, end, center, radius, closed, width, scale, attributes {TAG: value}, " +
                 "dynamic_props {NAME: value} (dynamic blocks; angles in degrees; lists take one of the allowed values), points + bulges (polyline vertices), " +
                 "cells [{row, col, text}] (tables, 0-based), draw_order (top or bottom). " +
-                "Props that do not apply to an entity type are reported in skipped.",
+                "Props that do not apply to an entity type are reported in skipped. Each entity is changed completely or not at all.",
                 Obj(Handles,
                     P("set", ObjAny("Properties to apply to every handle")),
                     P("items", Arr("Per-entity changes", "{'type':'object','properties':{'handle':{'type':'string'}},'required':['handle']}"))),
@@ -507,9 +507,16 @@ namespace T3LabCAD.Core
                 var r = new Dictionary<string, object> { ["handle"] = job.Key };
                 try
                 {
-                    var e = (Entity)c.Tr.GetObject(Acad.Id(c.Db, job.Key), OpenMode.ForWrite);
-                    List<string> skipped = Apply(c, e, job.Value);
-                    if (skipped.Count > 0) r["skipped"] = skipped;
+                    // one nested transaction per entity: a change that fails half way is undone for that entity only
+                    using (var sub = c.Db.TransactionManager.StartTransaction())
+                    {
+                        var sc = new ToolContext { Doc = c.Doc, Db = c.Db, Ed = c.Ed, Tr = sub };
+                        var e = (Entity)sub.GetObject(Acad.Id(c.Db, job.Key), OpenMode.ForWrite);
+                        List<string> skipped = Apply(sc, e, job.Value);
+                        sub.Commit();
+                        if (sc.NeedsRegen) c.NeedsRegen = true;
+                        if (skipped.Count > 0) r["skipped"] = skipped;
+                    }
                     r["ok"] = true;
                     updated++;
                 }
@@ -550,9 +557,11 @@ namespace T3LabCAD.Core
                         case MText m: m.Contents = MTextContents(text); return true;
                         case Dimension d: d.DimensionText = text; return true;
                         case MLeader ml when ml.ContentType == ContentType.MTextContent:
-                            MText copy = ml.MText;
-                            copy.Contents = MTextContents(text);
-                            ml.MText = copy;
+                            using (MText copy = ml.MText) // a copy: set it back, then dispose it
+                            {
+                                copy.Contents = MTextContents(text);
+                                ml.MText = copy;
+                            }
                             return true;
                     }
                     return false;
@@ -663,7 +672,7 @@ namespace T3LabCAD.Core
                 case "attributes":
                     if (!(e is BlockReference ba)) return false;
                     Dictionary<string, string> values = Values(s.Raw(rawKey));
-                    var attrs = ba.AttributeCollection.Cast<ObjectId>()
+                    var attrs = ba.AttributeCollection.Cast<ObjectId>().Where(aid => !aid.IsErased)
                         .Select(aid => (AttributeReference)c.Tr.GetObject(aid, OpenMode.ForRead)).ToList();
                     var unknown = values.Keys.Where(k => !attrs.Any(x => x.Tag.Equals(k, StringComparison.OrdinalIgnoreCase))).ToList();
                     if (unknown.Count > 0)
@@ -935,7 +944,7 @@ namespace T3LabCAD.Core
                     {
                         foreach (ObjectId aid in br.AttributeCollection)
                         {
-                            if (!(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar) || ar.Invisible || ar.IsErased) continue;
+                            if (aid.IsErased || !(tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar) || ar.Invisible) continue;
                             if (string.IsNullOrEmpty(ar.TextString)) continue;
                             if (ar.IsMTextAttribute)
                             {

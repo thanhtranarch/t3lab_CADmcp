@@ -140,10 +140,15 @@ namespace T3LabCAD.Core
                 if (h <= 0) throw new ToolError("text_height must be greater than 0.");
                 mt.TextHeight = h;
             }
-            mt.Location = pts[pts.Count - 1];
-            ml.MText = mt;
+            // the text goes past the landing by the dogleg + gap, so the leader does not fold back on itself
+            Point3d landing = pts[pts.Count - 1];
+            double side = landing.X >= pts[pts.Count - 2].X ? 1 : -1;
+            double offset = (ml.EnableDogleg ? ml.DoglegLength : 0) + ml.LandingGap;
+            mt.Location = landing + new Vector3d(side * offset, 0, 0);
+            ml.MText = mt; // copied by the setter
+            mt.Dispose();
             // a leader line starts at the landing side; earlier points are put in front, ending with the arrow
-            int line = ml.AddLeaderLine(pts[pts.Count - 1]);
+            int line = ml.AddLeaderLine(landing);
             for (int i = pts.Count - 2; i >= 0; i--) ml.AddFirstVertex(line, pts[i]);
             return Add(c, space, ml, it);
         }
