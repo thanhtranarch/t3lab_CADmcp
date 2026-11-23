@@ -54,6 +54,7 @@ namespace T3LabCAD.Loader
             source.Items.Add(Button("Stop", "T3MCPSTOP", "Stop the MCP server", "stop"));
             source.Items.Add(Button("Status", "T3MCPSTATUS", "Show port, tool count and last call", "status"));
             source.Items.Add(Button("Reload", "T3MCPRELOAD", "Reload T3LabCAD.Core.dll after installing a new build", "reload"));
+            source.Items.Add(Button("Agent\nCursors", "T3CURSORS", "Show what AI apps do in AutoCAD: a bar with each app, its goal and steps, and pointers on the drawing", "cursors"));
 
             var tab = new RibbonTab { Title = "T3Lab", Id = TabId };
             tab.Panels.Add(new RibbonPanel { Source = source });
@@ -113,9 +114,10 @@ namespace T3LabCAD.Loader
             ["stop"] = "M21.8,21.8 H26.2 V26.2 H21.8 Z",
             ["status"] = "M19.8,24 H21.4 L22.7,21.2 L25.3,26.8 L26.6,24 H28.2",
             ["reload"] = "M27.6,24 A3.6,3.6 0 1 1 26.4,21.3 M27,19.4 V21.6 H24.8",
+            ["cursors"] = "M21.6,20.4 L21.6,27.4 L23.4,25.7 L24.8,28.2 L26,27.6 L24.7,25.2 L27.2,25 Z",
         };
         // Play / stop read as media glyphs only when solid; drawn hollow they looked like "D" and "o".
-        static readonly HashSet<string> SolidBadge = new HashSet<string> { "start", "stop" };
+        static readonly HashSet<string> SolidBadge = new HashSet<string> { "start", "stop", "cursors" };
 
         /// <summary>Icon of `size` x `size` pixels at 96 DPI.</summary>
         /// <remarks>AutoCAD's ribbon shows a bitmap at its pixel size and ignores its DPI: a 64 px image at

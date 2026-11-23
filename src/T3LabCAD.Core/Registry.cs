@@ -64,6 +64,7 @@ namespace T3LabCAD.Core
         {
             _tools = new Dictionary<string, ToolDef>(StringComparer.Ordinal);
             StatusTools.Register();
+            AgentCursors.Register();
             DocumentTools.Register();
             FileTools.Register();
             LayoutTools.Register();

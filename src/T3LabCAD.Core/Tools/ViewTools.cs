@@ -172,7 +172,7 @@ namespace T3LabCAD.Core
             return new Dictionary<string, object> { ["zoomed"] = mode, ["min"] = Geo.P(min), ["max"] = Geo.P(max) };
         }
 
-        static void ZoomTo(Editor ed, Point3d min, Point3d max, double margin)
+        internal static void ZoomTo(Editor ed, Point3d min, Point3d max, double margin)
         {
             using (ViewTableRecord view = ed.GetCurrentView())
             {

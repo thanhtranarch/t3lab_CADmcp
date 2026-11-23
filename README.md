@@ -18,7 +18,7 @@ Claude ──stdio MCP──> bridge.py (%APPDATA%\T3LabCAD) ──TCP 127.0.0.1
 
 | Phần | Vai trò |
 |---|---|
-| `src/T3LabCAD.Loader` | DLL AutoCAD load (bundle autoloader). Lệnh `T3MCPSTART / T3MCPSTOP / T3MCPSTATUS / T3MCPRELOAD`, tab ribbon **T3Lab › MCP Server**. Nạp Core từ bytes nên Core thay được khi AutoCAD đang chạy. |
+| `src/T3LabCAD.Loader` | DLL AutoCAD load (bundle autoloader). Lệnh `T3MCPSTART / T3MCPSTOP / T3MCPSTATUS / T3MCPRELOAD / T3CURSORS`, tab ribbon **T3Lab › MCP Server**. Nạp Core từ bytes nên Core thay được khi AutoCAD đang chạy. |
 | `src/T3LabCAD.Core` | Server TCP (chỉ localhost), chạy tool trên main thread của AutoCAD, mỗi thay đổi = 1 bước Undo. |
 | `bridge/t3lab_cad_bridge.py` | MCP server stdio (chỉ dùng thư viện chuẩn Python). Kết nối được cả khi AutoCAD đóng, tự cache danh sách tool, hỗ trợ nhiều AutoCAD cùng lúc. |
 
@@ -121,6 +121,19 @@ Xuất file:
 | "Khoá viewport, freeze layer nội thất trong viewport đó" | `set_viewport locked=true freeze_layers=["I-*"]` |
 | "Đo khoảng cách giữa 2 trục, diện tích phòng này" | `measure mode=distance` / `measure mode=area handles=[...]` |
 
+## Agent Cursors — xem AI đang làm gì
+
+Giống Agent Cursors của T3Lab Revit: một bảng hoạt động cho biết AI app nào đang làm việc trong AutoCAD, nó định làm gì và đang ở bước nào. Mặc định **tắt**. Bật / tắt bằng lệnh `T3CURSORS` hoặc nút **Agent Cursors** trên ribbon (T3Lab › MCP Server). Khi AI gọi tool lần đầu mà bảng đang tắt, dòng lệnh nhắc gõ `T3CURSORS`.
+
+- **Bảng hoạt động** (palette, dock trái / phải): mỗi AI app 1 dòng (tên lấy từ MCP `clientInfo`: Claude, Claude Code, Cursor, ChatGPT...), trạng thái "Working 12 s", mục tiêu, kế hoạch ✓ / ▶ / ○, bước đang chạy theo màu (đọc, tạo, sửa, xoá, file, xem, lệnh) và 20 bước gần nhất (thời gian, số đối tượng tạo / sửa / xoá, lỗi).
+- **Nút:** *Pause* (AI chỉ được đọc; tool ghi bị từ chối kèm lời nhắn cho AI), *Select touched* (chọn đối tượng AI vừa đụng tới), *Zoom*, *Replay* (chiếu lại các bước trên bản vẽ), *Clear*.
+- **Show on the drawing:** con trỏ của từng AI lướt tới chỗ đang làm, khung xanh = tạo mới, khung màu AI = sửa, dấu × đỏ = xoá (kèm loại + layer). Chỉ là hình tạm (transient), không vào bản vẽ, không vào Undo, không in.
+- **Zoom to the work:** tự zoom tới vùng AI vừa làm.
+- AI có thể gọi `t3lab_narrate` (goal, tasks, step, done) để bảng hiện kế hoạch; không gọi thì bảng vẫn hiện từng tool.
+- Lựa chọn lưu ở `%APPDATA%\T3LabCAD\agent_cursors.json`. Đóng palette = tắt Agent Cursors. Mọi lỗi của phần hiển thị chỉ ghi log, không làm hỏng lời gọi tool.
+
+Ý tưởng con trỏ nhiều agent tham khảo từ [swarm-cursors](https://github.com/thanhtranarch/swarm-cursors) (chỉ lấy ý tưởng, không dùng mã).
+
 ## An toàn
 
 - Server chỉ nghe `127.0.0.1`.
@@ -160,6 +173,8 @@ Mã nguồn tool (`src/T3LabCAD.Core/Tools/`):
 | `XrefTools.cs` | xref |
 | `ViewTools.cs` | zoom, screenshot, named view |
 | `CommandTools.cs` | `run_command`, `cancel_command`, `reload_addin` |
+
+Agent Cursors (`src/T3LabCAD.Core/`): `AgentCursors.cs` (theo dõi bước, tên AI, `t3lab_narrate`, cài đặt), `ActivityPalette.cs` (bảng hoạt động), `CursorOverlay.cs` (con trỏ + khung trên bản vẽ bằng TransientManager). Hook trong `Rpc.CallTool`.
 
 Dùng chung (`src/T3LabCAD.Core/`): `Acad.cs` (space, layer, màu...), `Describe.cs` (entity → JSON), `Metrics.cs` (length / area), `Csv.cs` (CSV UTF-8 cho Excel).
 
