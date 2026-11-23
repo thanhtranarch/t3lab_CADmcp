@@ -834,6 +834,10 @@
      "file": {
       "type": "string",
       "description": "export / import: .las file path"
+     },
+     "overwrite": {
+      "type": "boolean",
+      "description": "export: replace an existing .las file (default false)"
      }
     },
     "required": [

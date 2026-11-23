@@ -118,7 +118,9 @@ namespace T3LabCAD.Core
                     double key;
                     if (arc != null)
                     {
-                        double ang = AngleOf(p - arc.Center);
+                        // StartAngle / EndAngle are measured from the arc's own X axis (flipped when its normal points down)
+                        Vector3d xAxis = Vector3d.XAxis.TransformBy(Matrix3d.PlaneToWorld(arc.Normal));
+                        double ang = xAxis.GetAngleTo(p - arc.Center, arc.Normal);
                         key = atStart ? Normalize(arc.StartAngle - ang) : Normalize(ang - arc.EndAngle);
                     }
                     else
@@ -305,9 +307,11 @@ namespace T3LabCAD.Core
                 if (atStart) l.StartPoint = p; else l.EndPoint = p;
             }
 
+            if (!fillet && (d1 < Tol) != (d2 < Tol))
+                throw new ToolError("distance and distance2 must both be greater than 0 (or both 0 for a sharp corner).");
             var space = (BlockTableRecord)c.Tr.GetObject(l1.OwnerId, OpenMode.ForWrite);
             var result = new Dictionary<string, object> { ["operation"] = op, ["corner"] = Geo.P(x) };
-            if (fillet && radius < Tol)
+            if ((fillet && radius < Tol) || (!fillet && d1 < Tol))
             {
                 SetNear(l1, start1, x);
                 SetNear(l2, start2, x);
@@ -350,8 +354,20 @@ namespace T3LabCAD.Core
             bool closed = pl.Closed;
             var pts = Enumerable.Range(0, n).Select(i => pl.GetPoint2dAt(i)).ToList();
             var bulges = Enumerable.Range(0, n).Select(i => pl.GetBulgeAt(i)).ToList();
+            var sw = Enumerable.Range(0, n).Select(i => pl.GetStartWidthAt(i)).ToList();
+            var ew = Enumerable.Range(0, n).Select(i => pl.GetEndWidthAt(i)).ToList();
             var outPts = new List<Point2d>();
             var outBulges = new List<double>();
+            var outSw = new List<double>();
+            var outEw = new List<double>();
+            // each output vertex carries the widths of the segment that starts at it
+            void Keep(int i)
+            {
+                outPts.Add(pts[i]);
+                outBulges.Add(bulges[i]);
+                outSw.Add(sw[i]);
+                outEw.Add(ew[i]);
+            }
             int done = 0, skipped = 0;
             for (int i = 0; i < n; i++)
             {
@@ -360,8 +376,7 @@ namespace T3LabCAD.Core
                 if (!corner || Math.Abs(bulges[prev]) > 1e-9 || Math.Abs(bulges[i]) > 1e-9)
                 {
                     if (corner) skipped++; // an arc segment touches this corner
-                    outPts.Add(pts[i]);
-                    outBulges.Add(bulges[i]);
+                    Keep(i);
                     continue;
                 }
                 Vector2d vin = pts[prev] - pts[i], vout = pts[next] - pts[i];
@@ -369,18 +384,16 @@ namespace T3LabCAD.Core
                 double theta = lenIn < Tol || lenOut < Tol ? 0 : vin.GetAngleTo(vout);
                 if (theta < 1e-6 || theta > Math.PI - 1e-6)
                 {
-                    outPts.Add(pts[i]);
-                    outBulges.Add(bulges[i]);
+                    Keep(i);
                     continue; // no corner (straight through or a zero-length segment)
                 }
                 double ta = fillet ? r / Math.Tan(theta / 2) : d1, tb = fillet ? ta : d2;
                 // a segment is shared with the neighbouring corner: use at most half of it, all of it next to an open end
                 double maxIn = !closed && prev == 0 ? lenIn : lenIn / 2, maxOut = !closed && next == n - 1 ? lenOut : lenOut / 2;
-                if (ta > maxIn + 1e-9 || tb > maxOut + 1e-9 || (fillet && r < Tol))
+                if (ta > maxIn + 1e-9 || tb > maxOut + 1e-9 || (fillet && r < Tol) || (!fillet && (d1 < Tol || d2 < Tol)))
                 {
                     skipped++;
-                    outPts.Add(pts[i]);
-                    outBulges.Add(bulges[i]);
+                    Keep(i);
                     continue;
                 }
                 Point2d t1 = pts[i] + vin.GetNormal() * ta, t2 = pts[i] + vout.GetNormal() * tb;
@@ -391,14 +404,19 @@ namespace T3LabCAD.Core
                     double cross = travelIn.X * travelOut.Y - travelIn.Y * travelOut.X; // > 0: left (counter-clockwise) turn
                     bulge = Math.Tan((Math.PI - theta) / 4) * Math.Sign(cross);
                 }
-                outPts.Add(t1);
+                outPts.Add(t1);              // the new arc / chamfer: the width the incoming segment ends with
                 outBulges.Add(bulge);
-                outPts.Add(t2);
+                outSw.Add(ew[prev]);
+                outEw.Add(ew[prev]);
+                outPts.Add(t2);              // the outgoing segment keeps its widths
                 outBulges.Add(bulges[i]);
+                outSw.Add(sw[i]);
+                outEw.Add(ew[i]);
                 done++;
             }
             if (done == 0) throw new ToolError("No corner could be " + (fillet ? "filleted" : "chamfered") +
-                                               (fillet && r < Tol ? ": pass radius > 0." : ": the segments are too short or curved."));
+                                               (fillet && r < Tol ? ": pass radius > 0." : !fillet && (d1 < Tol || d2 < Tol) ? ": pass distance > 0." :
+                                                   ": the segments are too short or curved."));
             pl.UpgradeOpen();
             for (int i = 0; i < outPts.Count; i++)
             {
@@ -406,8 +424,10 @@ namespace T3LabCAD.Core
                 {
                     pl.SetPointAt(i, outPts[i]);
                     pl.SetBulgeAt(i, outBulges[i]);
+                    pl.SetStartWidthAt(i, outSw[i]);
+                    pl.SetEndWidthAt(i, outEw[i]);
                 }
-                else pl.AddVertexAt(i, outPts[i], outBulges[i], 0, 0);
+                else pl.AddVertexAt(i, outPts[i], outBulges[i], outSw[i], outEw[i]);
             }
             var result = Info(pl);
             result["operation"] = fillet ? "fillet" : "chamfer";

@@ -138,12 +138,16 @@ namespace T3LabCAD.Core
                 catch (ToolError te) { throw new ToolError($"items[{i}] ({type}): {te.Message} Nothing was created."); }
                 catch (AcRx.Exception ae) { throw new ToolError($"items[{i}] ({type}): AutoCAD error {ae.ErrorStatus}{Where(ae)}. Nothing was created."); }
             }
-            return new Dictionary<string, object>
+            var result = new Dictionary<string, object>
             {
                 ["space"] = Acad.SpaceName(c.Tr, spaceId),
                 ["created_count"] = created.Count,
                 ["created"] = created,
             };
+            if (!space.IsLayout && space.IsDynamicBlock)
+                result["note"] = "Dynamic block: inserts whose parameters were changed use anonymous copies and do not show this until " +
+                                 "the block is opened and saved in the Block Editor (BEDIT).";
+            return result;
         }
 
         static Entity Create(ToolContext c, BlockTableRecord space, string type, Args it)
@@ -385,6 +389,21 @@ namespace T3LabCAD.Core
             }
         }
 
+        /// <summary>True when block btrId is target or has an insert of target somewhere inside it.</summary>
+        static bool Nests(Transaction tr, ObjectId btrId, ObjectId target, HashSet<ObjectId> seen)
+        {
+            if (btrId == target) return true;
+            if (!seen.Add(btrId)) return false;
+            var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+            foreach (ObjectId id in btr)
+            {
+                if (id.ObjectClass.IsDerivedFrom(AcRx.RXObject.GetClass(typeof(BlockReference))) &&
+                    tr.GetObject(id, OpenMode.ForRead) is BlockReference br && Nests(tr, br.BlockTableRecord, target, seen))
+                    return true;
+            }
+            return false;
+        }
+
         static Entity Insert(ToolContext c, BlockTableRecord space, Args it)
         {
             var db = c.Db;
@@ -408,6 +427,8 @@ namespace T3LabCAD.Core
             }
             if (!table.Has(name)) throw new ToolError($"Block '{name}' does not exist. See list_blocks, or pass block_file to import a .dwg.");
             ObjectId btrId = table[name];
+            if (!space.IsLayout && Nests(tr, btrId, space.ObjectId, new HashSet<ObjectId>()))
+                throw new ToolError($"'{name}' is or contains the block being edited ({space.Name}): a block cannot hold itself.");
 
             var br = new BlockReference(it.ReqPt("position"), btrId);
             br.SetDatabaseDefaults(db);
@@ -856,9 +877,11 @@ namespace T3LabCAD.Core
             var newHandles = new List<object>();
             if (op == "array_rect" || op == "array_polar")
             {
+                long cells = op == "array_rect" ? (long)Math.Max(1, a.Int("rows", 1)) * Math.Max(1, a.Int("columns", 1)) : Math.Max(1, a.Int("count", 0));
+                long total = (cells - 1) * Math.Max(1, ids.Count);
+                if (total > MaxArrayCopies)
+                    throw new ToolError($"That makes {total} copies; the limit is {MaxArrayCopies} per call.");
                 List<Matrix3d> copies = op == "array_rect" ? RectArray(a) : PolarArray(c, a, ids);
-                if (copies.Count * ids.Count > MaxArrayCopies)
-                    throw new ToolError($"That makes {copies.Count * ids.Count} copies; the limit is {MaxArrayCopies} per call.");
                 foreach (Matrix3d m in copies) CloneTransformed(c, ids, m, newHandles);
                 return new Dictionary<string, object>
                 {
@@ -886,7 +909,7 @@ namespace T3LabCAD.Core
         {
             int rows = a.Int("rows", 1), cols = a.Int("columns", 1);
             if (rows < 1 || cols < 1) throw new ToolError("rows and columns must be at least 1.");
-            if (rows * cols < 2) throw new ToolError("array_rect needs rows x columns of 2 or more.");
+            if ((long)rows * cols < 2) throw new ToolError("array_rect needs rows x columns of 2 or more.");
             double dx = cols > 1 ? a.ReqNum("column_spacing") : 0, dy = rows > 1 ? a.ReqNum("row_spacing") : 0;
             double angle = Rad(a.Num("angle", 0));
             var along = new Vector3d(Math.Cos(angle), Math.Sin(angle), 0);

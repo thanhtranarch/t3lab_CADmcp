@@ -556,6 +556,10 @@ def edit_checks(c):
     cut = lengths(c, [d.get("line")]) if ok(r) else []
     check("chamfer 100: lines 900 + 141.4214", ok(r) and lengths(c, [l3, l4]) == [900, 900] and cut and near(cut[0], 141.4214), d)
 
+    l5, l6 = add(line([0, -16500], [900, -16500]), line([1000, -16400], [1000, -15500]))
+    r, d = c.call("edit_geometry", operation="chamfer", handles=[l5, l6], distance=0)
+    check("chamfer 0 = sharp corner, no extra line", ok(r) and "line" not in d and lengths(c, [l5, l6]) == [1000, 1000], d)
+
     (pl,) = add({"type": "rectangle", "corner1": [2000, -16000], "corner2": [3000, -15500]})
     r, d = c.call("edit_geometry", operation="fillet", handles=[pl], radius=100)
     check("fillet every polyline corner: area 500000 - (4 - pi) * 100^2", ok(r) and near(d.get("area"), 491415.9265), d)
@@ -585,6 +589,8 @@ def edit_checks(c):
     check("add_entities into a block definition", ok(r) and n0.get("total_matched") == 1 and n1.get("total_matched") == 2, (d, n0, n1))
     r, d = c.call("add_entities", space="block:*Paper_Space", items=[{"type": "point", "position": [0, 0]}])
     check("block: refuses a layout block", r.get("isError"), d)
+    r, d = c.call("add_entities", space="block:T3-BLK-EDIT", items=[{"type": "insert", "block": "T3-BLK-EDIT", "position": [0, 0]}])
+    check("a block cannot be inserted into itself", r.get("isError") and "itself" in str(d), d)
 
     r, d = c.call("add_entities", items=[{"type": "text", "position": [2000, -15000], "height": 50, "field": {"type": "area", "handle": pl}}])
     th = d["created"][0]["handle"] if ok(r) else None
@@ -592,6 +598,13 @@ def edit_checks(c):
     r2, d2 = c.call("query_entities", handles=[th], detail="full")
     shown = d2["entities"][0].get("text", "") if ok(r2) else ""
     check("area field shows 491415.93", ok(r) and "491415.93" in shown, (d, shown))
+    (ring,) = add({"type": "circle", "center": [3000, -15000], "radius": 100})
+    r, d = c.call("add_entities", items=[{"type": "text", "position": [3000, -14800], "height": 50, "field": {"type": "length", "handle": ring}}])
+    th2 = d["created"][0]["handle"] if ok(r) else None
+    c.call("update_fields")
+    r2, d2 = c.call("query_entities", handles=[th2], detail="full")
+    shown = d2["entities"][0].get("text", "") if ok(r2) else ""
+    check("length field of a circle (Circumference) shows 628.32", ok(r) and "628.32" in shown, (d, shown))
     r, d = c.call("add_entities", items=[{"type": "text", "position": [0, 0], "height": 50, "field": {"type": "nonsense"}}])
     check("bad field type is refused", r.get("isError"), d)
 
@@ -622,6 +635,8 @@ def sheet_reference_checks(c, tmp):
     las = os.path.join(tmp, "t3.las")
     r, d = c.call("layer_state", action="export", name="T3-LS", file=las)
     check("layer_state export .las", ok(r) and os.path.isfile(las), d)
+    r, d = c.call("layer_state", action="export", name="T3-LS", file=las)
+    check("layer_state export refuses to overwrite", r.get("isError") and "overwrite" in str(d), d)
     c.call("layer_state", action="rename", name="T3-LS", new_name="T3-LS2")
     r, d = c.call("layer_state", action="restore", name="T3-LS2")
     check("layer_state rename + restore", ok(r), d)
@@ -663,6 +678,8 @@ def sheet_reference_checks(c, tmp):
     write_png(png)
     r, d = c.call("attach_underlay", path=png, position=[0, -24000], width=800)
     check("attach_underlay image", ok(r), d)
+    r, d = c.call("attach_underlay", path=png, position=[1000, -24000], width=800)
+    check("attach_underlay the same image again (shared definition)", ok(r), d)
     r, d = c.call("attach_point_cloud", path=os.path.join(tmp, "none.rcp"))
     check("attach_point_cloud missing file", r.get("isError") and "not found" in str(d), d)
     r, d = c.call("civil_query", kind="summary")

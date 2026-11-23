@@ -64,6 +64,7 @@ namespace T3LabCAD.Core
             if (!File.Exists(path)) throw new ToolError($"File not found: {path}");
             double scale = a.Num("scale", 1);
             if (scale <= 0) throw new ToolError("scale must be greater than 0.");
+            if (a.Has("layer")) Acad.ValidateName(a.ReqStr("layer"), "layer"); // before the attach, which commits at once
 
             ObjectId id = PointCloudEx.AttachPointCloud(path, a.Pt("position", Point3d.Origin), scale, Geo.Rad(a.Num("rotation", 0)), db);
             if (id.IsNull) throw new ToolError($"AutoCAD could not attach {Path.GetFileName(path)} (is the point cloud engine available?).");
@@ -186,8 +187,9 @@ namespace T3LabCAD.Core
                 case "summary":
                     return new Dictionary<string, object>
                     {
-                        ["alignments"] = Ids(doc.GetAlignmentIds()).Count(),
-                        ["surfaces"] = Ids(doc.GetSurfaceIds()).Count(),
+                        // (object): with a dynamic argument the result is dynamic and Count() (an extension) would not bind
+                        ["alignments"] = Ids((object)doc.GetAlignmentIds()).Count(),
+                        ["surfaces"] = Ids((object)doc.GetSurfaceIds()).Count(),
                         ["pipe_networks"] = Ids(Try(() => doc.GetPipeNetworkIds())).Count(),
                         ["cogo_points"] = Try(() => (int)doc.CogoPoints.Count),
                     };

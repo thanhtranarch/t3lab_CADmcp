@@ -30,7 +30,7 @@ namespace T3LabCAD.Core
                     P("layer", Str("Layer (created if missing)"))),
                 AttachUnderlay);
 
-            Registry.Add("export_entities", "Write entities to a drawing (WBLOCK)", ToolKind.Read,
+            Registry.Add("export_entities", "Write entities to a drawing (WBLOCK)", ToolKind.Write,
                 "WBLOCK: write entities (handles, all from one space) or a block definition (block) to a new .dwg, with the layers and " +
                 "styles they use. The active drawing does not change. version saves an older format.",
                 ObjR("path",
@@ -110,6 +110,7 @@ namespace T3LabCAD.Core
             if (dict.Contains(name) && tr.GetObject(dict.GetAt(name), OpenMode.ForRead) is RasterImageDef existing &&
                 string.Equals(existing.SourceFileName, path, StringComparison.OrdinalIgnoreCase))
             {
+                existing.UpgradeOpen(); // AssociateRasterDef adds a reactor to it
                 def = existing;
                 defId = existing.ObjectId;
             }
@@ -245,6 +246,7 @@ namespace T3LabCAD.Core
             else
             {
                 List<ObjectId> ids = Acad.Ids(db, a.Strs("handles"));
+                if (ids.Count == 0) throw new ToolError("Pass handles (entities of one space) or block.");
                 using (var tr = db.TransactionManager.StartTransaction())
                 {
                     ObjectId owner = tr.GetObject(ids[0], OpenMode.ForRead).OwnerId;

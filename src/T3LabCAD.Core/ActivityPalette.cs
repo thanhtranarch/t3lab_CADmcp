@@ -19,6 +19,15 @@ namespace T3LabCAD.Core
 
         public bool Alive => !_disposed;
 
+        public bool Visible
+        {
+            get
+            {
+                try { return !_disposed && _set.Visible; }
+                catch (Exception) { return false; }
+            }
+        }
+
         public ActivityPalette()
         {
             _view = new ActivityView();
@@ -35,15 +44,17 @@ namespace T3LabCAD.Core
 
         void OnStateChanged(object sender, PaletteSetStateEventArgs e)
         {
-            // the palette's X turns Agent Cursors off, as the X on the Revit bar does
-            if (!_disposed && e.NewState == StateEventIndex.Hide) Entry.Main?.Post(() => AgentCursors.SetEnabled(false));
+            // Hide comes from the X, but also from HIDEPALETTES, clean screen, a workspace switch or no drawing open:
+            // the bar just stays closed (T3CURSORS opens it again, or turns Agent Cursors off when it is open).
+            if (!_disposed && e.NewState == StateEventIndex.Show) _view.Invalidate(true);
         }
 
-        public void Show(AgentCursors.View view)
+        /// <summary>New content; reveal = open the bar if it is closed (refreshes never reopen a bar the user closed).</summary>
+        public void Show(AgentCursors.View view, bool reveal)
         {
             if (_disposed) return;
             _view.SetView(view);
-            if (!_set.Visible) _set.Visible = true;
+            if (reveal && !_set.Visible) _set.Visible = true;
         }
 
         public void Dispose()
@@ -84,6 +95,22 @@ namespace T3LabCAD.Core
 
         Color _back, _fore, _muted, _line, _panel;
         readonly Font _font = new Font("Segoe UI", 9f), _bold = new Font("Segoe UI", 9f, FontStyle.Bold), _small = new Font("Segoe UI", 8f);
+        // GDI+ objects are cached per colour (a handful) and disposed with the control: no allocation per repaint
+        readonly Dictionary<int, SolidBrush> _brushes = new Dictionary<int, SolidBrush>();
+        readonly Dictionary<int, Pen> _pens = new Dictionary<int, Pen>();
+        readonly StringFormat _oneLine = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+
+        SolidBrush B(Color c)
+        {
+            if (!_brushes.TryGetValue(c.ToArgb(), out SolidBrush b)) _brushes[c.ToArgb()] = b = new SolidBrush(c);
+            return b;
+        }
+
+        Pen P(Color c)
+        {
+            if (!_pens.TryGetValue(c.ToArgb(), out Pen p)) _pens[c.ToArgb()] = p = new Pen(c, 1f);
+            return p;
+        }
 
         public static Color ActionColor(ActionKind kind)
         {
@@ -213,7 +240,7 @@ namespace T3LabCAD.Core
             {
                 // name row: pointer in the app's colour, name, status
                 Pointer(g, agent.Color, x, y + 1);
-                g.DrawString(agent.Name, _bold, new SolidBrush(_fore), x + 16, y);
+                g.DrawString(agent.Name, _bold, B(_fore), x + 16, y);
                 string status = agent.Status == "Working" ? $"Working {(int)(agent.NowSeconds + since)} s" : agent.Status;
                 Color statusColor = agent.Status == "Paused" ? Color.FromArgb(0xE0, 0x8E, 0x00) : agent.Working ? ActivityView.ActionColor(agent.NowAction) : _muted;
                 SizeF ss = g.MeasureString(status, _small);
@@ -221,9 +248,9 @@ namespace T3LabCAD.Core
                 if (agent.Working)
                 {
                     int pulse = 3 + (int)((DateTime.Now.Millisecond / 250) % 2);
-                    g.FillEllipse(new SolidBrush(statusColor), sx - 10, y + 5, pulse * 2, pulse * 2);
+                    g.FillEllipse(B(statusColor), sx - 10, y + 5, pulse * 2, pulse * 2);
                 }
-                g.DrawString(status, _small, new SolidBrush(statusColor), sx, y + 1);
+                g.DrawString(status, _small, B(statusColor), sx, y + 1);
                 y += 20;
 
                 if (!string.IsNullOrEmpty(agent.Goal)) Line(g, agent.Goal, _font, _fore, x, ref y, inner);
@@ -231,17 +258,17 @@ namespace T3LabCAD.Core
                 {
                     int done = agent.PlanDone ? agent.Tasks.Count : Math.Max(0, agent.Step - 1);
                     string label = agent.PlanDone ? "Done" : $"Step {Math.Max(1, agent.Step)}/{agent.Tasks.Count}";
-                    g.DrawString(label, _small, new SolidBrush(_muted), x, y);
+                    g.DrawString(label, _small, B(_muted), x, y);
                     int barX = x + 70, barW = Math.Max(20, inner - 70);
-                    g.FillRectangle(new SolidBrush(_line), barX, y + 5, barW, 5);
-                    g.FillRectangle(new SolidBrush(agent.Color), barX, y + 5, (int)(barW * (double)done / agent.Tasks.Count), 5);
+                    g.FillRectangle(B(_line), barX, y + 5, barW, 5);
+                    g.FillRectangle(B(agent.Color), barX, y + 5, (int)(barW * (double)done / agent.Tasks.Count), 5);
                     y += 18;
                     for (int i = 0; i < agent.Tasks.Count; i++)
                     {
                         bool isDone = agent.PlanDone || i < agent.Step - 1, now = !agent.PlanDone && i == agent.Step - 1;
                         string mark = isDone ? "✓" : now ? "▶" : "○";
                         Color c = isDone ? _muted : now ? _fore : _muted;
-                        g.DrawString(mark, _small, new SolidBrush(isDone ? Color.FromArgb(0x14, 0xAE, 0x5C) : now ? agent.Color : _muted), x + 2, y);
+                        g.DrawString(mark, _small, B(isDone ? Color.FromArgb(0x14, 0xAE, 0x5C) : now ? agent.Color : _muted), x + 2, y);
                         int ty = y;
                         Line(g, $"{i + 1}  {agent.Tasks[i]}", now ? _bold : _small, c, x + 16, ref ty, inner - 16);
                         y = ty;
@@ -252,14 +279,14 @@ namespace T3LabCAD.Core
                     // what runs now: a block in the action's colour
                     Color ac = ActivityView.ActionColor(agent.NowAction);
                     var block = new Rectangle(x, y + 2, inner, 34);
-                    g.FillRectangle(new SolidBrush(Color.FromArgb(40, ac)), block);
-                    g.FillRectangle(new SolidBrush(ac), x, y + 2, 4, 34);
-                    g.DrawString(agent.NowAction.ToString().ToUpperInvariant(), _small, new SolidBrush(ac), x + 10, y + 4);
-                    g.DrawString(agent.Now, _bold, new SolidBrush(_fore), new RectangleF(x + 10, y + 17, inner - 14, 16));
+                    g.FillRectangle(B(Color.FromArgb(40, ac)), block);
+                    g.FillRectangle(B(ac), x, y + 2, 4, 34);
+                    g.DrawString(agent.NowAction.ToString().ToUpperInvariant(), _small, B(ac), x + 10, y + 4);
+                    g.DrawString(agent.Now, _bold, B(_fore), new RectangleF(x + 10, y + 17, inner - 14, 16));
                     y += 42;
                 }
                 y += 6;
-                g.DrawLine(new Pen(_line), x, y, x + inner, y);
+                g.DrawLine(P(_line), x, y, x + inner, y);
                 y += 8;
             }
 
@@ -272,7 +299,7 @@ namespace T3LabCAD.Core
 
             if (_model.Feed.Count > 0)
             {
-                g.DrawString("LAST STEPS", _small, new SolidBrush(_muted), x, y);
+                g.DrawString("LAST STEPS", _small, B(_muted), x, y);
                 y += 16;
                 foreach (AgentCursors.StepView step in _model.Feed.Take(8))
                 {
@@ -280,21 +307,21 @@ namespace T3LabCAD.Core
                     Color mc = step.State == StepState.Ok ? Color.FromArgb(0x14, 0xAE, 0x5C)
                         : step.State == StepState.Refused ? Color.FromArgb(0xE0, 0x8E, 0x00) : Color.FromArgb(0xF2, 0x48, 0x22);
                     string mark = step.State == StepState.Ok ? "✓" : step.State == StepState.Refused ? "⏸" : "✕";
-                    g.FillRectangle(new SolidBrush(ActivityView.ActionColor(step.Action)), x, y + 2, 3, 13);
-                    g.DrawString(mark, _small, new SolidBrush(mc), x + 6, y);
+                    g.FillRectangle(B(ActivityView.ActionColor(step.Action)), x, y + 2, 3, 13);
+                    g.DrawString(mark, _small, B(mc), x + 6, y);
                     string right = $"{step.Agent} · {Ago(step.When)}";
                     SizeF rs = g.MeasureString(right, _small);
-                    g.DrawString(right, _small, new SolidBrush(_muted), x + inner - rs.Width, y);
-                    g.DrawString(step.Caption, _font, new SolidBrush(_fore), new RectangleF(x + 20, y - 1, Math.Max(10, inner - rs.Width - 26), 16),
-                        new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
+                    g.DrawString(right, _small, B(_muted), x + inner - rs.Width, y);
+                    g.DrawString(step.Caption, _font, B(_fore), new RectangleF(x + 20, y - 1, Math.Max(10, inner - rs.Width - 26), 16),
+                        _oneLine);
                     y += 17;
                     string detail = step.State == StepState.Ok
                         ? (step.Changed > 0 ? $"{step.Changed} changed · {step.Seconds:0.0} s" : $"{step.Seconds:0.0} s")
                         : step.Error ?? "";
                     if (detail.Length > 0)
                     {
-                        g.DrawString(detail, _small, new SolidBrush(step.State == StepState.Ok ? _muted : mc),
-                            new RectangleF(x + 20, y - 2, inner - 20, 14), new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
+                        g.DrawString(detail, _small, B(step.State == StepState.Ok ? _muted : mc),
+                            new RectangleF(x + 20, y - 2, inner - 20, 14), _oneLine);
                         y += 14;
                     }
                 }
@@ -305,17 +332,17 @@ namespace T3LabCAD.Core
         {
             var area = new RectangleF(x, y, width, 400);
             SizeF size = g.MeasureString(text, font, width);
-            g.DrawString(text, font, new SolidBrush(color), area);
+            g.DrawString(text, font, B(color), area);
             y += (int)Math.Ceiling(size.Height) + 2;
         }
 
         /// <summary>A small mouse pointer, the avatar of an AI app.</summary>
-        static void Pointer(Graphics g, Color color, int x, int y)
+        void Pointer(Graphics g, Color color, int x, int y)
         {
             var pts = new[] { new PointF(x, y), new PointF(x, y + 13), new PointF(x + 3.6f, y + 9.6f), new PointF(x + 6.2f, y + 14.5f),
                               new PointF(x + 8.2f, y + 13.6f), new PointF(x + 5.8f, y + 8.8f), new PointF(x + 10.5f, y + 8.8f) };
-            g.FillPolygon(new SolidBrush(color), pts);
-            g.DrawPolygon(new Pen(Color.White, 1f), pts);
+            g.FillPolygon(B(color), pts);
+            g.DrawPolygon(P(Color.White), pts);
         }
 
         protected override void Dispose(bool disposing)
@@ -325,6 +352,11 @@ namespace T3LabCAD.Core
                 _font.Dispose();
                 _bold.Dispose();
                 _small.Dispose();
+                _oneLine.Dispose();
+                foreach (SolidBrush b in _brushes.Values) b.Dispose();
+                foreach (Pen p in _pens.Values) p.Dispose();
+                _brushes.Clear();
+                _pens.Clear();
             }
             base.Dispose(disposing);
         }
