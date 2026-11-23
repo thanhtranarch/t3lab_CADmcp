@@ -250,7 +250,7 @@ def tools():
                 "inputSchema": json.loads(schema.replace("'", '"')),
                 "annotations": {
                     "title": title,
-                    "readOnlyHint": kind == "ToolKind.Read",
+                    "readOnlyHint": kind == "ToolKind.Read" and not named.get("writesFiles", False),
                     "destructiveHint": bool(named.get("destructive", False)),
                     "openWorldHint": False,
                 },
