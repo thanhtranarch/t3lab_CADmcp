@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
+using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 using static T3LabCAD.Core.Sch;
 
 namespace T3LabCAD.Core
@@ -103,8 +104,21 @@ namespace T3LabCAD.Core
             string name = a.ReqStr("layout");
             if (name.Equals("Model", StringComparison.OrdinalIgnoreCase)) throw new ToolError("Viewports go on a paper space layout, not Model.");
             if (!lm.LayoutExists(name)) throw new ToolError($"Layout '{name}' does not exist (see list_layouts, or create_layout).");
-            // Viewport.On only works on the current layout (switching also initializes a new layout's paper).
-            if (!lm.CurrentLayout.Equals(name, StringComparison.OrdinalIgnoreCase)) lm.CurrentLayout = name;
+            // Viewport.On only works on the current layout. The first switch to a new layout sets up its paper;
+            // with LAYOUTCREATEVIEWPORT=1 AutoCAD would also add its own viewport next to the one asked for.
+            if (!lm.CurrentLayout.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                object autoViewport = AcApp.GetSystemVariable("LAYOUTCREATEVIEWPORT");
+                try
+                {
+                    AcApp.SetSystemVariable("LAYOUTCREATEVIEWPORT", (short)0);
+                    lm.CurrentLayout = name;
+                }
+                finally
+                {
+                    AcApp.SetSystemVariable("LAYOUTCREATEVIEWPORT", autoViewport);
+                }
+            }
 
             using (var tr = db.TransactionManager.StartTransaction())
             {
@@ -151,14 +165,16 @@ namespace T3LabCAD.Core
                     fit = Math.Min(width / ew, height / eh) * 0.95;
                 }
                 double scale = a.Has("scale") ? ParseScale(a.Raw("scale")) : fit ?? 1.0;
+                ObjectId layerId = a.Has("layer") ? Acad.EnsureLayer(db, tr, a.ReqStr("layer")) : ObjectId.Null;
+                var space = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForWrite);
+                string layoutName = layout.LayoutName;
 
                 var vp = new Viewport();
                 vp.SetDatabaseDefaults(db);
                 vp.CenterPoint = new Point3d((p1.X + p2.X) / 2, (p1.Y + p2.Y) / 2, 0);
                 vp.Width = width;
                 vp.Height = height;
-                if (a.Has("layer")) vp.LayerId = Acad.EnsureLayer(db, tr, a.ReqStr("layer"));
-                var space = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForWrite);
+                if (!layerId.IsNull) vp.LayerId = layerId;
                 Acad.Append(space, vp, tr);
                 vp.ViewDirection = Vector3d.ZAxis;
                 vp.ViewTarget = Point3d.Origin;
@@ -173,7 +189,7 @@ namespace T3LabCAD.Core
                 return new Dictionary<string, object>
                 {
                     ["handle"] = handle,
-                    ["layout"] = layout.LayoutName,
+                    ["layout"] = layoutName,
                     ["center"] = Geo.P(new Point2d((p1.X + p2.X) / 2, (p1.Y + p2.Y) / 2)),
                     ["width"] = Geo.R(width),
                     ["height"] = Geo.R(height),

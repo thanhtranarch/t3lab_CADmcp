@@ -75,6 +75,18 @@ namespace T3LabCAD.Core
             string name = (a.Str("name") ?? Path.GetFileNameWithoutExtension(path)).Trim();
             Acad.ValidateName(name, "xref");
 
+            // every check before AttachXref: rolling back a loaded xref through an aborted transaction is best avoided
+            double scale = a.Num("scale", 1);
+            if (Math.Abs(scale) < 1e-12) throw new ToolError("scale cannot be 0.");
+            ObjectId spaceId = Acad.SpaceId(db, tr, a.Str("space"));
+            ObjectId layerId = a.Has("layer") ? Acad.EnsureLayer(db, tr, a.ReqStr("layer")) : ObjectId.Null;
+            string relative = null;
+            if (a.Bool("relative_path", false))
+            {
+                relative = c.Doc.IsNamedDrawing ? Relative(Path.GetDirectoryName(c.Doc.Name), path) : null;
+                if (relative == null) throw new ToolError("relative_path needs a saved host drawing on the same drive as the xref.");
+            }
+
             var blocks = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
             ObjectId xrefId;
             if (blocks.Has(name))
@@ -87,25 +99,17 @@ namespace T3LabCAD.Core
             {
                 xrefId = a.Bool("overlay", false) ? db.OverlayXref(path, name) : db.AttachXref(path, name);
                 if (xrefId.IsNull) throw new ToolError($"AutoCAD could not attach {path}.");
-                if (a.Bool("relative_path", false))
-                {
-                    string relative = c.Doc.IsNamedDrawing ? Relative(Path.GetDirectoryName(c.Doc.Name), path) : null;
-                    if (relative == null) throw new ToolError("relative_path needs a saved host drawing on the same drive as the xref.");
-                    ((BlockTableRecord)tr.GetObject(xrefId, OpenMode.ForWrite)).PathName = relative;
-                }
+                if (relative != null) ((BlockTableRecord)tr.GetObject(xrefId, OpenMode.ForWrite)).PathName = relative;
             }
 
-            ObjectId spaceId = Acad.SpaceId(db, tr, a.Str("space"));
             var space = (BlockTableRecord)tr.GetObject(spaceId, OpenMode.ForWrite);
-            double scale = a.Num("scale", 1);
-            if (Math.Abs(scale) < 1e-12) throw new ToolError("scale cannot be 0.");
             var br = new BlockReference(a.Pt("position", Point3d.Origin), xrefId)
             {
                 Rotation = Geo.Rad(a.Num("rotation", 0)),
                 ScaleFactors = new Scale3d(scale),
             };
             br.SetDatabaseDefaults(db);
-            if (a.Has("layer")) br.LayerId = Acad.EnsureLayer(db, tr, a.ReqStr("layer"));
+            if (!layerId.IsNull) br.LayerId = layerId;
             Acad.Append(space, br, tr);
 
             var info = Info((BlockTableRecord)tr.GetObject(xrefId, OpenMode.ForRead));

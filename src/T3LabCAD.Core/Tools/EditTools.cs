@@ -724,13 +724,15 @@ namespace T3LabCAD.Core
             foreach (string h in a.Strs("handles"))
             {
                 var parts = new DBObjectCollection();
+                var created = new List<Entity>();
                 try
                 {
                     var e = tr.GetObject(Acad.Id(c.Db, h), OpenMode.ForRead) as Entity ?? throw new ToolError("not an entity");
+                    if (e is BlockReference xr && ((BlockTableRecord)tr.GetObject(xr.BlockTableRecord, OpenMode.ForRead)).IsFromExternalReference)
+                        throw new ToolError("this is an xref: bind it first (manage_xref action=insert), then explode the insert.");
                     e.Explode(parts);
                     if (!keep) e.UpgradeOpen(); // fails on a locked layer before anything is added
                     var space = (BlockTableRecord)tr.GetObject(e.OwnerId, OpenMode.ForWrite);
-                    var created = new List<Entity>();
                     foreach (DBObject part in parts)
                     {
                         if (!(part is Entity pe)) continue;
@@ -775,8 +777,9 @@ namespace T3LabCAD.Core
                 }
                 finally
                 {
-                    foreach (DBObject part in parts)
-                        if (part.ObjectId.IsNull && !part.IsDisposed) part.Dispose(); // pieces not added to the drawing
+                    // pieces not added to the drawing (skipped, or the explode failed half way)
+                    foreach (DBObject part in parts.Cast<DBObject>().Concat(created))
+                        if (part.ObjectId.IsNull && !part.IsDisposed) part.Dispose();
                 }
             }
             var result = new Dictionary<string, object>
