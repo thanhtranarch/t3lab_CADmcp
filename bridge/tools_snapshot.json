@@ -2511,6 +2511,314 @@
    }
   },
   {
+   "name": "attach_underlay",
+   "title": "Attach image / PDF / DWF / DGN",
+   "description": "Attach a raster image (png, jpg, tif, bmp...), a PDF page, a DWF / DWFx sheet or a DGN model as an underlay (IMAGEATTACH / PDFATTACH...). Images: width in drawing units (default the pixel width). Underlays: scale (default 1). Not converted to geometry (PDFIMPORT is run_command).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "space": {
+      "type": "string",
+      "description": "model, paper, current (default), a layout name, or block:NAME to work inside a block definition"
+     },
+     "path": {
+      "type": "string",
+      "description": "File to attach"
+     },
+     "position": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Insertion point, lower left (default [0, 0])"
+     },
+     "width": {
+      "type": "number",
+      "description": "Image: width in drawing units"
+     },
+     "scale": {
+      "type": "number",
+      "description": "PDF / DWF / DGN: scale (default 1)"
+     },
+     "rotation": {
+      "type": "number",
+      "description": "Rotation in degrees (default 0)"
+     },
+     "page": {
+      "type": "string",
+      "description": "PDF: page number (default 1); DWF: sheet name; DGN: model name"
+     },
+     "name": {
+      "type": "string",
+      "description": "Definition name (default the file name)"
+     },
+     "layer": {
+      "type": "string",
+      "description": "Layer (created if missing)"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "annotations": {
+    "title": "Attach image / PDF / DWF / DGN",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "export_entities",
+   "title": "Write entities to a drawing (WBLOCK)",
+   "description": "WBLOCK: write entities (handles, all from one space) or a block definition (block) to a new .dwg, with the layers and styles they use. The active drawing does not change. version saves an older format.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "New .dwg path"
+     },
+     "handles": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Entity handles (hex strings from query_entities)"
+     },
+     "block": {
+      "type": "string",
+      "description": "Or: a block definition to write out"
+     },
+     "base_point": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "handles: base point that becomes 0,0 of the new drawing (default [0, 0])"
+     },
+     "version": {
+      "type": "string",
+      "enum": [
+       "2018",
+       "2013",
+       "2010",
+       "2007",
+       "2004",
+       "2000"
+      ],
+      "description": "File format (default current)"
+     },
+     "overwrite": {
+      "type": "boolean",
+      "description": "Replace an existing file (default false)"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "annotations": {
+    "title": "Write entities to a drawing (WBLOCK)",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "set_ucs",
+   "title": "User coordinate system",
+   "description": "UCS of the current view. get: origin and axes, the named UCS list and the drawing geolocation (if set); world; set {origin, x_axis or rotation (degrees about Z)}; save {name} the current UCS; restore {name}. Tools always take and return WCS points; this only changes what the user sees and UCS-based commands.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "get",
+       "world",
+       "set",
+       "save",
+       "restore"
+      ],
+      "description": "What to do"
+     },
+     "origin": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "set: new origin (WCS)"
+     },
+     "x_axis": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "set: direction of the new X axis [dx, dy]"
+     },
+     "rotation": {
+      "type": "number",
+      "description": "set: rotate the X axis by this many degrees about Z (instead of x_axis)"
+     },
+     "name": {
+      "type": "string",
+      "description": "save / restore: named UCS"
+     },
+     "replace": {
+      "type": "boolean",
+      "description": "save: overwrite a UCS with this name (default false)"
+     }
+    },
+    "required": [
+     "action"
+    ]
+   },
+   "annotations": {
+    "title": "User coordinate system",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "attach_point_cloud",
+   "title": "Attach point cloud",
+   "description": "Attach a ReCap point cloud (.rcp project or .rcs scan) for Scan-to-BIM tracing, like POINTCLOUDATTACH. Returns its handle and extents (zoom handles=[...] to see it).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": ".rcp or .rcs file"
+     },
+     "position": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 3,
+      "description": "Insertion point (default [0, 0, 0])"
+     },
+     "scale": {
+      "type": "number",
+      "description": "Scale (default 1)"
+     },
+     "rotation": {
+      "type": "number",
+      "description": "Rotation in degrees (default 0)"
+     },
+     "layer": {
+      "type": "string",
+      "description": "Layer (created if missing)"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "annotations": {
+    "title": "Attach point cloud",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "civil_query",
+   "title": "Civil 3D objects",
+   "description": "Civil 3D only. kind: summary (counts), alignment (length, stations), profile, surface (elevation range, points), pipe_network (pipes / structures), cogo_point (number, name, E / N / Z, description). elevation_at {surface, points} gives the surface elevation at each XY; station_offset {alignment, points} gives station and offset.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "summary",
+       "alignment",
+       "profile",
+       "surface",
+       "pipe_network",
+       "cogo_point"
+      ],
+      "description": "What to list (default summary)"
+     },
+     "name": {
+      "type": "string",
+      "description": "Wildcard filter on names"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max items (default 200, cogo points 1000)"
+     },
+     "elevation_at": {
+      "type": "object",
+      "description": "{surface: name, points: [[x, y], ...]}"
+     },
+     "station_offset": {
+      "type": "object",
+      "description": "{alignment: name, points: [[x, y], ...]}"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Civil 3D objects",
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "civil_points",
+   "title": "Civil 3D points and surface",
+   "description": "Civil 3D only. Create COGO points from points [[x, y, z], ...] (next point numbers, optional description), and / or add the points to a TIN surface (created when missing).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "points": {
+      "type": "array",
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "description": "[[x, y, z], ...]"
+     },
+     "description": {
+      "type": "string",
+      "description": "Raw description for the new COGO points"
+     },
+     "cogo": {
+      "type": "boolean",
+      "description": "Create COGO points (default true)"
+     },
+     "surface": {
+      "type": "string",
+      "description": "Also add the points as vertices of this TIN surface (created if missing)"
+     }
+    },
+    "required": [
+     "points"
+    ]
+   },
+   "annotations": {
+    "title": "Civil 3D points and surface",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "zoom",
    "title": "Zoom",
    "description": "Zoom the current view: extents (everything), window {p1, p2}, handles (fit these entities), or center {center, height}.",
