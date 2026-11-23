@@ -15,7 +15,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from smoke_bridge import BRIDGE, check  # noqa: E402
 
+import shutil  # noqa: E402
 import subprocess  # noqa: E402
+import tempfile  # noqa: E402
 import time  # noqa: E402
 
 
@@ -83,6 +85,12 @@ def main():
     check("scratch still active", status["active_document"]["name"] == scratch, status.get("active_document"))
 
     write_checks(c, shots)
+    named_object_checks(c)
+    tmp = os.path.join(tempfile.gettempdir(), "t3labcad_live_{}".format(os.getpid()))
+    if not file_checks(c, tmp):
+        print("scratch drawing is not active after the file checks; stopping")
+        return 1
+    c.call("add_entities", items=[{"type": "point", "position": [0, 0]}])  # leave an unsaved change
 
     r, d = c.call("close_document")
     check("close_document refuses unsaved", r.get("isError") and "unsaved" in d, d)
@@ -90,6 +98,7 @@ def main():
     check("close_document discard", not r.get("isError"), d)
     r, status = c.call("get_status")
     check("back to the user's drawing (or none)", status.get("active_document", {}).get("name") == user_doc, status.get("active_document"))
+    shutil.rmtree(tmp, ignore_errors=True)
 
     # ---- hot reload of the Core
     before = c.call("list_autocad_instances")[1]["instances"][0]["calls"]
@@ -220,6 +229,186 @@ def write_checks(c, shots):
     check("screenshot scratch", any(b["type"] == "image" for b in r["content"]), d)
     r, d = c.call("delete_entities", handles=[handles["spline"]])
     check("delete_entities", not r.get("isError") and d["erased"] == 1, d)
+
+
+def ok(r):
+    return not r.get("isError")
+
+
+def named_object_checks(c):
+    """Create / rename / delete for layouts, styles, linetypes, blocks, groups, views; explode; purge (scratch drawing)."""
+    # layouts + viewports
+    r, d = c.call("create_layout", name="T3 Sheet A")
+    check("create_layout", ok(r) and d["layout"] == "T3 Sheet A", d)
+    r, d = c.call("create_layout", name="T3 Sheet B", copy_from="T3 Sheet A", activate=True)
+    check("create_layout copy + activate", ok(r) and d["current_layout"] == "T3 Sheet B", d)
+    r, d = c.call("add_viewport", layout="T3 Sheet B", corner1=[20, 20], corner2=[200, 150], view_window=[[0, -300], [1500, 1200]])
+    check("add_viewport fit window", ok(r) and d.get("handle"), d)
+    r, d = c.call("add_viewport", layout="T3 Sheet B", corner1=[210, 20], corner2=[280, 150], view_center=[700, 650], scale="1:20")
+    check("add_viewport 1:20", ok(r) and abs(d["scale"] - 0.05) < 1e-9 and d["scale_text"] == "1:20", d)
+    r, d = c.call("rename_object", kind="layout", name="T3 Sheet A", new_name="T3 Sheet A2")
+    check("rename_object layout", ok(r), d)
+    r, d = c.call("delete_object", kind="layout", names=["T3 Sheet A2"])
+    check("delete_object layout", ok(r) and d["deleted"] == 1, d)
+    r, d = c.call("delete_object", kind="layout", names=["Model"])
+    check("delete_object refuses Model", r.get("isError"), d)
+    r, d = c.call("list_named_objects", kind="layout")
+    check("list_named_objects layout", ok(r) and any(l["name"] == "T3 Sheet B" for l in d["layouts"]), d)
+    c.call("activate_layout", name="Model")
+
+    # text styles
+    r, d = c.call("set_text_style", name="T3-Arial", font="Arial", width_factor=0.8, make_current=True)
+    check("set_text_style TrueType", ok(r) and d["created"] and d["style"]["font"] == "Arial", d)
+    r, d = c.call("set_text_style", name="T3-Romans", font="romans.shx", oblique=15)
+    check("set_text_style SHX", ok(r) and d["style"]["font"].lower() == "romans.shx", d)
+    r, d = c.call("set_text_style", name="T3-Bad", font="NoSuchFont123")
+    check("set_text_style rejects unknown font", r.get("isError"), d)
+    r, d = c.call("list_named_objects", kind="text_style", name="T3-*")
+    check("list_named_objects text_style", ok(r) and d["count"] == 2, d)
+    r, d = c.call("delete_object", kind="text_style", names=["T3-Arial"])
+    check("delete_object refuses current text style", r.get("isError"), d)
+    c.call("set_text_style", name="Standard", make_current=True)
+    r, d = c.call("rename_object", kind="text_style", name="T3-Romans", new_name="T3-Simplex")
+    check("rename_object text_style", ok(r), d)
+    r, d = c.call("delete_object", kind="text_style", names=["T3-Simplex"])
+    check("delete_object text_style", ok(r) and d["deleted"] == 1, d)
+
+    # dimension styles
+    r, d = c.call("set_dim_style", name="T3-100", props={"DIMSCALE": 100, "DIMTXT": 2.5, "dimasz": 2, "DIMTXSTY": "T3-Arial",
+                                                         "DIMBLK": "_ARCHTICK", "DIMCLRD": 1})
+    check("set_dim_style create", ok(r) and d["created"] and "DIMSCALE" in d["changed"], d)
+    r, d = c.call("set_dim_style", name="T3-100", props={"DIMNOPE": 1})
+    check("set_dim_style rejects unknown variable", r.get("isError"), d)
+    r, d = c.call("list_named_objects", kind="dim_style", name="T3-100", full=True)
+    item = d["items"][0] if ok(r) and d["items"] else {}
+    check("dim_style full read back", item.get("DIMSCALE") == 100 and item.get("DIMTXSTY") == "T3-Arial" and
+          item.get("DIMBLK", "").upper() == "_ARCHTICK", item)
+    r, d = c.call("set_dim_style", name="T3-100", new_name="T3-DIM100", make_current=True)
+    check("set_dim_style rename + current", ok(r) and d["dim_style"] == "T3-DIM100" and d["style"].get("current"), d)
+    c.call("set_dim_style", name="Standard", make_current=True)
+
+    # linetypes
+    r, d = c.call("load_linetype")
+    check("load_linetype lists the file", ok(r) and d["count"] > 10, d)
+    r, d = c.call("load_linetype", names=["HIDDEN*", "CENTER", "NOPE_LT"])
+    check("load_linetype wildcard", ok(r) and "HIDDEN2" in d["loaded"] + d["already_loaded"] and d.get("not_in_file") == ["NOPE_LT"], d)
+    r, d = c.call("delete_object", kind="linetype", names=["HIDDEN2"])
+    check("delete_object linetype", ok(r), d)
+    r, d = c.call("delete_object", kind="linetype", names=["Continuous"])
+    check("delete_object refuses Continuous", r.get("isError"), d)
+
+    # blocks
+    r, d = c.call("rename_object", kind="block", name="T3_TEST_BLOCK", new_name="T3_BLOCK_RENAMED")
+    check("rename_object block", ok(r), d)
+    r, d = c.call("delete_object", kind="block", names=["T3_BLOCK_RENAMED"])
+    check("delete_object refuses block with inserts", r.get("isError") and "insert" in d, d)
+    r, d = c.call("delete_object", kind="block", names=["T3_BLOCK_RENAMED"], erase_references=True)
+    check("delete_object block + inserts", ok(r) and d["results"][0].get("inserts_erased") == 2, d)
+
+    # groups
+    r, d = c.call("add_entities", items=[{"type": "line", "start": [0, 2000], "end": [500, 2000]},
+                                         {"type": "circle", "center": [800, 2000], "radius": 100}])
+    members = [i["handle"] for i in d["created"]] if ok(r) else []
+    r, d = c.call("set_group", name="T3-GRP", handles=members, description="smoke test")
+    check("set_group create", ok(r) and d["created"] and d["entities"] == 2, d)
+    r, d = c.call("set_group", name="T3-GRP", remove_handles=members[:1])
+    check("set_group remove", ok(r) and d["entities"] == 1, d)
+    r, d = c.call("rename_object", kind="group", name="T3-GRP", new_name="T3-GRP2")
+    check("rename_object group", ok(r), d)
+    r, d = c.call("list_named_objects", kind="group")
+    check("list_named_objects group", ok(r) and any(g["name"] == "T3-GRP2" for g in d["items"]), d)
+    r, d = c.call("delete_object", kind="group", names=["T3-GRP2"])
+    check("delete_object group (ungroup)", ok(r) and d["results"][0].get("entities_kept") == 1, d)
+
+    # named views
+    r, d = c.call("save_view", name="T3-V1", p1=[0, 0], p2=[1000, 800])
+    check("save_view window", ok(r) and d["created"], d)
+    r, d = c.call("save_view", name="T3-V1")
+    check("save_view refuses duplicate", r.get("isError"), d)
+    r, d = c.call("restore_view", name="T3-V1")
+    check("restore_view", ok(r), d)
+    r, d = c.call("rename_object", kind="view", name="T3-V1", new_name="T3-V2")
+    check("rename_object view", ok(r), d)
+    r, d = c.call("delete_object", kind="view", names=["T3-V2", "NO_SUCH_VIEW"])
+    check("delete_object partial result", ok(r) and d["deleted"] == 1 and not d["results"][1]["ok"], d)
+
+    # explode
+    r, d = c.call("add_entities", items=[{"type": "rectangle", "corner1": [0, 3000], "corner2": [300, 3200]}])
+    rect = d["created"][0]["handle"] if ok(r) else None
+    r, d = c.call("explode_entities", handles=[rect])
+    check("explode rectangle -> 4 lines", ok(r) and d["new_count"] == 4, d)
+    r, d = c.call("explode_entities", handles=[d["new_handles"][0]] if ok(r) else [])
+    check("explode refuses a line", r.get("isError"), d)
+
+    # purge
+    c.call("set_layer", name="T3-UNUSED")
+    r, d = c.call("purge", dry_run=True)
+    check("purge dry_run reports", ok(r) and "T3-UNUSED" in d["would_purge"].get("layer", []), d)
+    r, d = c.call("list_layers", name="T3-UNUSED")
+    check("dry_run changed nothing", ok(r) and d["count"] == 1, d)
+    r, d = c.call("purge", kinds=["layer"], names=["T3-UNUSED"])
+    check("purge one layer", ok(r) and d["purged"].get("layer") == ["T3-UNUSED"], d)
+
+
+def dwg_version(path):
+    with open(path, "rb") as f:
+        return f.read(6).decode("ascii", "replace")
+
+
+def file_checks(c, tmp):
+    """Save / copy / version / list / xref / rename / delete files in a temp folder. Returns False if the scratch drawing got lost."""
+    os.makedirs(tmp, exist_ok=True)
+    main = os.path.join(tmp, "t3_main.dwg")
+    copy = os.path.join(tmp, "t3_copy.dwg")
+    old = os.path.join(tmp, "t3_copy2013.dwg")
+    r, d = c.call("save_document", path=main)
+    check("save_document Save As", ok(r) and os.path.exists(main), d)
+    r, d = c.call("save_document", path=copy, copy=True)
+    check("save_document copy", ok(r) and os.path.exists(copy) and dwg_version(copy) == "AC1032", d)
+    r, d = c.call("save_document", path=old, copy=True, version="2013")
+    check("save_document copy as 2013", ok(r) and os.path.exists(old) and dwg_version(old) == "AC1027", d)
+    r, status = c.call("get_status")
+    check("Save As renamed the drawing, copies did not", status["active_document"]["name"] == "t3_main.dwg", status.get("active_document"))
+
+    r, d = c.call("list_drawing_files", folder=tmp)
+    names = {f["name"]: f for f in d.get("files", [])} if ok(r) else {}
+    check("list_drawing_files", ok(r) and d["total"] == 3 and names.get("t3_main.dwg", {}).get("open"), d)
+
+    r, d = c.call("attach_xref", path=copy, relative_path=True, position=[5000, 0])
+    check("attach_xref relative", ok(r) and d["status"] == "loaded" and d["path"].startswith(".\\"), d)
+    r, d = c.call("list_named_objects", kind="xref")
+    check("list_named_objects xref", ok(r) and d["count"] == 1, d)
+    r, d = c.call("manage_xref", names=["t3_copy"], action="unload")
+    check("manage_xref unload", ok(r) and d["xrefs"][0]["status"] == "unloaded", d)
+    r, d = c.call("manage_xref", names=["t3_copy"], action="reload")
+    check("manage_xref reload", ok(r) and d["xrefs"][0]["status"] == "loaded", d)
+    r, d = c.call("manage_xref", names=["t3_copy"], action="detach")
+    check("manage_xref detach", ok(r), d)
+
+    r, d = c.call("rename_document", new_name="t3_renamed")
+    check("rename_document refuses unsaved changes", r.get("isError") and "unsaved" in d, d)
+    r, d = c.call("rename_document", new_name="t3_renamed", save_changes=True)
+    renamed = os.path.join(tmp, "t3_renamed.dwg")
+    check("rename_document open drawing", ok(r) and d["reopened"] and os.path.exists(renamed) and not os.path.exists(main), d)
+    r, d = c.call("rename_document", path=old, new_name="t3_old.dwg")
+    old = os.path.join(tmp, "t3_old.dwg")
+    check("rename_document closed file", ok(r) and os.path.exists(old), d)
+
+    r, d = c.call("new_document", save_as=os.path.join(tmp, "t3_new.dwg"))
+    check("new_document save_as", ok(r) and os.path.exists(os.path.join(tmp, "t3_new.dwg")), d)
+    r, d = c.call("close_document", document="t3_new.dwg")
+    check("close the saved new drawing", ok(r), d)
+    r, d = c.call("activate_document", document="t3_renamed.dwg")
+
+    r, d = c.call("delete_drawing_file", path=renamed)
+    check("delete_drawing_file refuses an open drawing", r.get("isError"), d)
+    r, d = c.call("delete_drawing_file", path=old)
+    check("delete_drawing_file to Recycle Bin", ok(r) and d["recycle_bin"] and not os.path.exists(old), d)
+    r, d = c.call("delete_drawing_file", path=copy, permanent=True)
+    check("delete_drawing_file permanent", ok(r) and not os.path.exists(copy), d)
+
+    r, status = c.call("get_status")
+    return ok(r) and status.get("active_document", {}).get("name") == "t3_renamed.dwg"
 
 
 if __name__ == "__main__":

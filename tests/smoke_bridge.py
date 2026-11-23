@@ -69,6 +69,10 @@ def main():
     check("ping", c.request("ping")["result"] == {})
     tools = [t["name"] for t in c.request("tools/list")["result"]["tools"]]
     check("tools/list offline has local tools", "list_autocad_instances" in tools, tools)
+    with open(os.path.join(ROOT, "bridge", "tools_snapshot.json"), encoding="utf-8") as f:
+        snapshot = [t["name"] for t in json.load(f)["tools"]]
+    check("tools/list offline = shipped snapshot ({} tools)".format(len(snapshot)),
+          all(n in tools for n in snapshot) and len(set(snapshot)) == len(snapshot), tools)
     r = c.request("tools/call", {"name": "get_status", "arguments": {}})["result"]
     check("call offline -> not reachable", r.get("isError") and "not reachable" in r["content"][0]["text"], r)
     check("unknown method", "error" in c.request("nope/nope"))

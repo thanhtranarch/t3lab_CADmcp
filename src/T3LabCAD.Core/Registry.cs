@@ -63,9 +63,14 @@ namespace T3LabCAD.Core
             _tools = new Dictionary<string, ToolDef>(StringComparer.Ordinal);
             StatusTools.Register();
             DocumentTools.Register();
+            FileTools.Register();
+            LayoutTools.Register();
             LayerTools.Register();
+            StyleTools.Register();
+            NamedObjectTools.Register();
             QueryTools.Register();
             EditTools.Register();
+            XrefTools.Register();
             ViewTools.Register();
             CommandTools.Register();
         }
@@ -138,6 +143,8 @@ namespace T3LabCAD.Core
             "{'type':'string','enum':[" + string.Join(",", values.Select(v => "'" + v + "'")) + "],'description':'" + d + "'}";
         public static string ObjAny(string d) => "{'type':'object','description':'" + d + "'}";
         public static string Arr(string d, string itemSchema) => "{'type':'array','items':" + itemSchema + ",'description':'" + d + "'}";
+        public static string EnumArr(string d, params string[] values) =>
+            "{'type':'array','items':{'type':'string','enum':[" + string.Join(",", values.Select(v => "'" + v + "'")) + "]},'description':'" + d + "'}";
 
         public const string Space = "'space':{'type':'string','description':'model, paper, current (default) or a layout name'}";
         public const string Handles = "'handles':{'type':'array','items':{'type':'string'},'description':'Entity handles (hex strings from query_entities)'}";
