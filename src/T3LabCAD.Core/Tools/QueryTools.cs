@@ -234,7 +234,7 @@ namespace T3LabCAD.Core
                 ["height"] = Geo.R(height),
             };
 
-        static object ListBlocks(ToolContext c, Args a)
+        internal static object ListBlocks(ToolContext c, Args a)
         {
             var tr = c.Tr;
             string filter = a.Str("name");

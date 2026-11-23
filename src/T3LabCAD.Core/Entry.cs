@@ -12,7 +12,7 @@ namespace T3LabCAD.Core
     /// </summary>
     public static class Entry
     {
-        public const string Version = "1.0.0";
+        public const string Version = "1.2.0";
         public const int PortMin = 48900, PortMax = 48908;
 
         internal static MainThread Main { get; private set; }
