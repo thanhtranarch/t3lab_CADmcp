@@ -16,9 +16,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from smoke_bridge import BRIDGE, check  # noqa: E402
 
 import shutil  # noqa: E402
+import struct  # noqa: E402
 import subprocess  # noqa: E402
 import tempfile  # noqa: E402
 import time  # noqa: E402
+import zlib  # noqa: E402
 
 
 class Client:
@@ -28,7 +30,7 @@ class Client:
         self.proc = subprocess.Popen([sys.executable, "-I", BRIDGE], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, env=env)
         self.n = 0
-        self.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        self.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t3lab-smoke", "version": "1"}})
 
     def request(self, method, params=None):
         self.n += 1
@@ -89,10 +91,12 @@ def main():
     geometry_checks(c)
     annotation_checks(c)
     viewport_checks(c)
+    edit_checks(c)
     tmp = os.path.join(tempfile.gettempdir(), "t3labcad_live_{}".format(os.getpid()))
     if not file_checks(c, tmp):
         print("scratch drawing is not active after the file checks; stopping")
         return 1
+    sheet_reference_checks(c, os.path.join(tmp, "refs"))
     c.call("add_entities", items=[{"type": "point", "position": [0, 0]}])  # leave an unsaved change
 
     r, d = c.call("close_document")
@@ -506,6 +510,163 @@ def viewport_checks(c):
     c.call("activate_layout", name="Model")
     r, d = c.call("delete_object", kind="layout", names=["T3 VP"])
     check("delete the test layout", ok(r), d)
+
+
+def near(a, b, tol=0.01):
+    try:
+        return abs(float(a) - float(b)) <= tol
+    except (TypeError, ValueError):
+        return False
+
+
+def lengths(c, handles):
+    r, d = c.call("query_entities", handles=[h for h in handles if h], detail="full")
+    return sorted(e.get("length") for e in d["entities"]) if ok(r) else []
+
+
+def edit_checks(c):
+    """1.4: extend, trim, break, fillet, chamfer; align, arrays; space block:NAME; fields."""
+    def add(*items):
+        r, d = c.call("add_entities", items=list(items))
+        return [i["handle"] for i in d["created"]] if ok(r) else [None] * len(items)
+
+    def line(p, q):
+        return {"type": "line", "start": p, "end": q}
+
+    short, edge = add(line([0, -12000], [500, -12000]), line([1000, -12500], [1000, -11500]))
+    r, d = c.call("edit_geometry", operation="extend", handles=[short], boundary_handles=[edge])
+    check("extend a 500 line to an edge at x=1000", ok(r) and lengths(c, [short]) == [1000], d)
+
+    long_, cutter = add(line([0, -13000], [2000, -13000]), line([1000, -13500], [1000, -12500]))
+    r, d = c.call("edit_geometry", operation="trim", handles=[long_], boundary_handles=[cutter], pick_point=[1500, -13000])
+    t = d["trimmed"][0] if ok(r) else {}
+    check("trim removes the picked side", t.get("removed_length") == 1000 and [p.get("length") for p in t.get("remaining", [])] == [1000], d)
+
+    (b,) = add(line([0, -14000], [1000, -14000]))
+    r, d = c.call("edit_geometry", operation="break", handles=[b], point=[400, -14000], point2=[600, -14000])
+    check("break removes 400..600", ok(r) and sorted(p["length"] for p in d["pieces"]) == [400, 400], d)
+
+    l1, l2 = add(line([0, -15000], [1000, -15000]), line([1000, -15000], [1000, -14000]))
+    r, d = c.call("edit_geometry", operation="fillet", handles=[l1, l2], radius=200)
+    arc = lengths(c, [d.get("arc")]) if ok(r) else []
+    check("fillet R200: lines 800 + arc 314.1593", ok(r) and lengths(c, [l1, l2]) == [800, 800] and arc and near(arc[0], 314.1593), d)
+
+    l3, l4 = add(line([0, -16000], [1000, -16000]), line([1000, -16000], [1000, -15000]))
+    r, d = c.call("edit_geometry", operation="chamfer", handles=[l3, l4], distance=100)
+    cut = lengths(c, [d.get("line")]) if ok(r) else []
+    check("chamfer 100: lines 900 + 141.4214", ok(r) and lengths(c, [l3, l4]) == [900, 900] and cut and near(cut[0], 141.4214), d)
+
+    (pl,) = add({"type": "rectangle", "corner1": [2000, -16000], "corner2": [3000, -15500]})
+    r, d = c.call("edit_geometry", operation="fillet", handles=[pl], radius=100)
+    check("fillet every polyline corner: area 500000 - (4 - pi) * 100^2", ok(r) and near(d.get("area"), 491415.9265), d)
+
+    (al,) = add(line([0, -17000], [100, -17000]))
+    r, d = c.call("transform_entities", handles=[al], operation="align", source_points=[[0, -17000], [100, -17000]],
+                  target_points=[[500, -17000], [500, -16900]])
+    r2, d2 = c.call("measure", mode="closest", handles=[al], point=[500, -16950])
+    check("align turns the line onto the target", ok(r) and ok(r2) and d2["distance"] == 0, (d, d2))
+
+    (cir,) = add({"type": "circle", "center": [0, -18000], "radius": 50})
+    r, d = c.call("transform_entities", handles=[cir], operation="array_rect", rows=2, columns=3, row_spacing=200, column_spacing=300)
+    check("array_rect 2 x 3 = 5 copies", ok(r) and d["new_entities"] == 5, d)
+    r, d = c.call("transform_entities", handles=[cir], operation="array_polar", center=[0, -18500], count=6)
+    third = d.get("new_handles", [])[2:3] if ok(r) else []
+    r2, d2 = c.call("measure", mode="closest", handles=third or [cir], point=[0, -19000])
+    check("array_polar 6 = 5 copies, the 3rd at 180 deg", ok(r) and d["new_entities"] == 5 and third and ok(r2) and d2["distance"] == 50, (d, d2))
+    r, d = c.call("transform_entities", handles=[cir], operation="array_rect", rows=100, columns=100, row_spacing=10, column_spacing=10)
+    check("array refuses more than 5000 copies", r.get("isError"), d)
+
+    (bl,) = add(line([0, -20000], [100, -20000]))
+    r, d = c.call("create_block", name="T3-BLK-EDIT", handles=[bl], base_point=[0, -20000])
+    check("create_block for block editing", ok(r), d)
+    n0 = c.call("query_entities", space="block:T3-BLK-EDIT", detail="count")[1]
+    r, d = c.call("add_entities", space="block:T3-BLK-EDIT", items=[{"type": "circle", "center": [0, 0], "radius": 10}])
+    n1 = c.call("query_entities", space="block:T3-BLK-EDIT", detail="count")[1]
+    check("add_entities into a block definition", ok(r) and n0.get("total_matched") == 1 and n1.get("total_matched") == 2, (d, n0, n1))
+    r, d = c.call("add_entities", space="block:*Paper_Space", items=[{"type": "point", "position": [0, 0]}])
+    check("block: refuses a layout block", r.get("isError"), d)
+
+    r, d = c.call("add_entities", items=[{"type": "text", "position": [2000, -15000], "height": 50, "field": {"type": "area", "handle": pl}}])
+    th = d["created"][0]["handle"] if ok(r) else None
+    r, d = c.call("update_fields")
+    r2, d2 = c.call("query_entities", handles=[th], detail="full")
+    shown = d2["entities"][0].get("text", "") if ok(r2) else ""
+    check("area field shows 491415.93", ok(r) and "491415.93" in shown, (d, shown))
+    r, d = c.call("add_entities", items=[{"type": "text", "position": [0, 0], "height": 50, "field": {"type": "nonsense"}}])
+    check("bad field type is refused", r.get("isError"), d)
+
+    r, d = c.call("t3lab_narrate", goal="Smoke test", tasks=["draw", "check"], step=1)
+    check("t3lab_narrate", ok(r), d)
+    r, d = c.call("t3lab_narrate", done=True)
+    check("t3lab_narrate done", ok(r), d)
+
+
+def write_png(path, w=8, h=4):
+    raw = b"".join(b"\x00" + b"\xff\x00\x00" * w for _ in range(h))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) +
+                chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def sheet_reference_checks(c, tmp):
+    """1.4: layer_state, set_page_setup, set_ucs, export_entities, attach_underlay, point cloud / Civil 3D errors."""
+    os.makedirs(tmp, exist_ok=True)
+    r, d = c.call("layer_state", action="save", name="T3-LS", description="smoke")
+    check("layer_state save", ok(r), d)
+    r, d = c.call("layer_state", action="save", name="T3-LS")
+    check("layer_state save refuses a duplicate", r.get("isError"), d)
+    las = os.path.join(tmp, "t3.las")
+    r, d = c.call("layer_state", action="export", name="T3-LS", file=las)
+    check("layer_state export .las", ok(r) and os.path.isfile(las), d)
+    c.call("layer_state", action="rename", name="T3-LS", new_name="T3-LS2")
+    r, d = c.call("layer_state", action="restore", name="T3-LS2")
+    check("layer_state rename + restore", ok(r), d)
+    c.call("layer_state", action="delete", name="T3-LS2")
+    r, d = c.call("layer_state", action="import", file=las)
+    check("layer_state import", ok(r) and "T3-LS" in json.dumps(d), d)
+    r, d = c.call("layer_state", action="list")
+    check("layer_state list", ok(r) and any(s["name"] == "T3-LS" for s in d["layer_states"]), d)
+
+    r, d = c.call("set_page_setup", name="T3-A3", plotter="DWG To PDF.pc3", paper="A3", scale="fit")
+    check("set_page_setup create", ok(r) and d["created"], d)
+    r, d = c.call("list_named_objects", kind="page_setup")
+    check("list_named_objects page_setup", ok(r) and "T3-A3" in json.dumps(d), d)
+    r, d = c.call("rename_object", kind="page_setup", name="T3-A3", new_name="T3-A3B")
+    r2, d2 = c.call("delete_object", kind="page_setup", names=["T3-A3B"])
+    check("rename + delete page setup", ok(r) and ok(r2), (d, d2))
+
+    r, d = c.call("set_ucs", action="set", origin=[100, 100], rotation=90)
+    cur = d.get("current", {}) if ok(r) else {}
+    check("set_ucs origin + rotation", (cur.get("origin") or [0])[:2] == [100, 100] and near((cur.get("x_axis") or [9])[0], 0, 1e-6), d)
+    c.call("set_ucs", action="save", name="T3-UCS")
+    c.call("set_ucs", action="world")
+    r, d = c.call("set_ucs", action="restore", name="T3-UCS")
+    check("set_ucs save / world / restore", ok(r) and d["current"]["origin"][:2] == [100, 100], d)
+    r, d = c.call("set_ucs", action="world")
+    check("set_ucs world", ok(r) and d["current"]["is_world"], d)
+
+    r, d = c.call("add_entities", items=[{"type": "line", "start": [0, -23000], "end": [100, -23000]}])
+    h = d["created"][0]["handle"] if ok(r) else None
+    out = os.path.join(tmp, "wblock.dwg")
+    r, d = c.call("export_entities", path=out, handles=[h], base_point=[0, -23000])
+    check("export_entities (WBLOCK)", ok(r) and os.path.isfile(out) and d["entities"] == 1, d)
+    r, d = c.call("export_entities", path=out, handles=[h])
+    check("export_entities refuses to overwrite", r.get("isError"), d)
+    r, d = c.call("export_entities", path=os.path.join(tmp, "blk.dwg"), block="T3-BLK-EDIT")
+    check("export_entities block", ok(r) and os.path.isfile(os.path.join(tmp, "blk.dwg")), d)
+
+    png = os.path.join(tmp, "t3.png")
+    write_png(png)
+    r, d = c.call("attach_underlay", path=png, position=[0, -24000], width=800)
+    check("attach_underlay image", ok(r), d)
+    r, d = c.call("attach_point_cloud", path=os.path.join(tmp, "none.rcp"))
+    check("attach_point_cloud missing file", r.get("isError") and "not found" in str(d), d)
+    r, d = c.call("civil_query", kind="summary")
+    check("civil_query (Civil 3D) or a clear error", ok(r) or "Civil 3D" in str(d), d)
 
 
 def is_pdf(path):
