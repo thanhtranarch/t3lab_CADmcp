@@ -240,7 +240,7 @@ namespace T3LabCAD.Core
                         var ps = new PlotSettings(layout.ModelType);
                         settings.Add(ps);
                         ps.CopyFrom(layout);
-                        Configure(ps, layout, a, device);
+                        Configure(ps, layout, a, device, true);
 
                         var info = new PlotInfo { Layout = sheet.LayoutId, OverrideSettings = ps };
                         new PlotInfoValidator { MediaMatchingPolicy = MatchingPolicy.MatchEnabled }.Validate(info);
@@ -288,29 +288,34 @@ namespace T3LabCAD.Core
         }
 
         /// <summary>Page setup of the layout, with the overrides the call asked for.</summary>
-        static void Configure(PlotSettings ps, Layout layout, Args a, string device)
+        /// <summary>
+        /// Apply the plot options of a call to ps, starting from basis (the layout or page setup it was copied from; may be ps itself).
+        /// modelExtents: Model plots its extents when area is not given (export_pdf), not for a page setup.
+        /// </summary>
+        internal static void Configure(PlotSettings ps, PlotSettings basis, Args a, string device, bool modelExtents)
         {
             PlotSettingsValidator psv = PlotSettingsValidator.Current;
-            bool newDevice = !string.Equals(layout.PlotConfigurationName, device, StringComparison.OrdinalIgnoreCase);
+            bool newDevice = !string.Equals(basis.PlotConfigurationName, device, StringComparison.OrdinalIgnoreCase);
+            Point2d size = basis.PlotPaperSize; // read before the device changes it
+            bool model = basis.ModelType;
             psv.SetPlotConfigurationName(ps, device, null);
             psv.RefreshLists(ps);
             if (a.Has("paper")) psv.SetCanonicalMediaName(ps, MatchPaper(psv, ps, a.ReqStr("paper")));
             else if (newDevice)
             {
                 // keep the sheet size of the page setup on the new plotter
-                Point2d size = layout.PlotPaperSize;
                 if (size.X > 0 && size.Y > 0) psv.SetClosestMediaName(ps, size.X, size.Y, PlotPaperUnit.Millimeters, false);
             }
 
             string area = a.Str("area")?.Trim().ToLowerInvariant();
-            if (area == null && layout.ModelType) area = "extents";
-            bool areaChanged = area != null && !(area == "layout" && !layout.ModelType);
+            if (area == null && model && modelExtents) area = "extents";
+            bool areaChanged = area != null && !(area == "layout" && !model);
             switch (area)
             {
                 case null:
                     break;
                 case "layout":
-                    if (layout.ModelType) throw new ToolError("area=layout is for paper space layouts; Model can use extents, display, limits or window.");
+                    if (model) throw new ToolError("area=layout is for paper space layouts; Model can use extents, display, limits or window.");
                     psv.SetPlotType(ps, Autodesk.AutoCAD.DatabaseServices.PlotType.Layout);
                     break;
                 case "extents":
@@ -408,7 +413,7 @@ namespace T3LabCAD.Core
                    double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        static Dictionary<string, object> Describe(string layout, PlotSettings s)
+        internal static Dictionary<string, object> Describe(string layout, PlotSettings s)
         {
             string scale;
             if (s.UseStandardScale && s.StdScaleType == StdScaleType.ScaleToFit) scale = "fit";
