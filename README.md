@@ -73,7 +73,7 @@ Tạo / đổi tên / xoá theo loại đối tượng:
 | Linetype | `load_linetype` | `rename_object` | `delete_object` / `purge` |
 | View | `save_view` | `rename_object` | `delete_object` |
 | Group | `set_group` | `rename_object` | `delete_object` (ungroup) |
-| Xref | `attach_xref` | `rename_object kind=block` | `manage_xref detach` |
+| Xref | `attach_xref` | — (không đổi tên xref: layer/style của nó giữ tên cũ) | `manage_xref detach` |
 | Entity | `add_entities` | — | `delete_entities` |
 
 An toàn: server chỉ nghe `127.0.0.1`. `run_command` từ chối AutoLISP (`(`, `!`) và các lệnh nạp/chạy code hoặc mở chương trình khác (SHELL, NETLOAD, APPLOAD, SCRIPT, VBARUN...). Tool ghi bị từ chối khi người dùng đang ở giữa một lệnh. `close_document` không đóng bản vẽ chưa lưu trừ khi `save=true` hoặc `discard_changes=true`; `rename_document` cũng vậy (`save_changes=true`). `delete_drawing_file` chỉ xoá file AutoCAD (.dwg, .dxf, .dwt, .dws, .bak, .sv$) không đang mở, mặc định vào Recycle Bin. `delete_object` / `purge` không xoá đối tượng còn đang dùng, layer 0, style Standard hay đối tượng current; `purge dry_run=true` chỉ báo cáo.

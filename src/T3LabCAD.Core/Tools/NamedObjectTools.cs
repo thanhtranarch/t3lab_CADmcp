@@ -168,6 +168,8 @@ namespace T3LabCAD.Core
                 var btr = (BlockTableRecord)rec;
                 if (btr.IsLayout) throw new ToolError($"'{rec.Name}' is a layout block: rename the layout instead (kind=layout).");
                 if (btr.IsAnonymous) throw new ToolError($"'{rec.Name}' is an anonymous block and cannot be renamed.");
+                if (btr.IsFromExternalReference)
+                    throw new ToolError($"'{rec.Name}' is an xref: its layers and styles keep the {rec.Name}| prefix, so it is not renamed here.");
             }
             if (rec.Name == newName) throw new ToolError("new_name is the current name.");
             Acad.ValidateName(newName, Label(kind));

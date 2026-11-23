@@ -96,6 +96,7 @@ namespace T3LabCAD.Core
                 rec.PerspectiveEnabled = current.PerspectiveEnabled;
             }
             rec.IsPaperspaceView = InPaperSpace(db);
+            if (rec.IsPaperspaceView) rec.Layout = LayoutManager.Current.GetLayoutId(LayoutManager.Current.CurrentLayout);
             if (a.Has("category")) rec.CategoryName = a.Str("category") ?? "";
             return new Dictionary<string, object>
             {

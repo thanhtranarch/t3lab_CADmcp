@@ -316,7 +316,11 @@ namespace T3LabCAD.Core
                 : SummaryDimVars.Select(n => typeof(DimStyleTableRecord).GetProperty(n)).Where(p => p != null);
             foreach (PropertyInfo p in props)
             {
-                try { d[p.Name.ToUpperInvariant()] = DimValue(p.GetValue(s, null), tr); }
+                try
+                {
+                    object v = p.GetValue(s, null);
+                    d[p.Name.ToUpperInvariant()] = p.Name == "Dimjogang" && v is double rad ? Geo.Deg(rad) : DimValue(v, tr);
+                }
                 catch (Exception) { /* some variables cannot be read on every style */ }
             }
             return d;
@@ -411,7 +415,7 @@ namespace T3LabCAD.Core
             string var = pi.Name.ToUpperInvariant();
             Type t = pi.PropertyType;
             object v;
-            if (t == typeof(double)) v = Args.ToDouble(value, var);
+            if (t == typeof(double)) v = var == "DIMJOGANG" ? Geo.Rad(Args.ToDouble(value, var)) : Args.ToDouble(value, var);
             else if (t == typeof(int)) v = (int)Math.Round(Args.ToDouble(value, var));
             else if (t == typeof(short)) v = (short)Math.Round(Args.ToDouble(value, var));
             else if (t == typeof(bool)) v = Args.ToBool(value, var);
