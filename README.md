@@ -144,11 +144,11 @@ Xuất file:
 Giống Agent Cursors của T3Lab Revit: một bảng hoạt động cho biết AI app nào đang làm việc trong AutoCAD, nó định làm gì và đang ở bước nào. Mặc định **tắt**. Bật / tắt bằng lệnh `T3CURSORS` hoặc nút **Agent Cursors** trên ribbon (T3Lab › MCP Server). Khi AI gọi tool lần đầu mà bảng đang tắt, dòng lệnh nhắc gõ `T3CURSORS`.
 
 - **Bảng hoạt động** (palette, dock trái / phải): mỗi AI app 1 dòng (tên lấy từ MCP `clientInfo`: Claude, Claude Code, Cursor, ChatGPT...), trạng thái "Working 12 s", mục tiêu, kế hoạch ✓ / ▶ / ○, bước đang chạy theo màu (đọc, tạo, sửa, xoá, file, xem, lệnh) và 20 bước gần nhất (thời gian, số đối tượng tạo / sửa / xoá, lỗi).
-- **Nút:** *Pause* (AI chỉ được đọc; tool ghi bị từ chối kèm lời nhắn cho AI), *Select touched* (chọn đối tượng AI vừa đụng tới), *Zoom*, *Replay* (chiếu lại các bước trên bản vẽ), *Clear*.
+- **Nút:** *Pause* (AI chỉ được đọc / xem; tool sửa bản vẽ hoặc ghi file bị từ chối kèm lời nhắn cho AI, kể cả lệnh đang chờ), *Select touched* (chọn đối tượng AI vừa đụng tới), *Zoom*, *Replay* (chiếu lại các bước trên bản vẽ), *Clear*.
 - **Show on the drawing:** con trỏ của từng AI lướt tới chỗ đang làm, khung xanh = tạo mới, khung màu AI = sửa, dấu × đỏ = xoá (kèm loại + layer). Chỉ là hình tạm (transient), không vào bản vẽ, không vào Undo, không in.
 - **Zoom to the work:** tự zoom tới vùng AI vừa làm.
 - AI có thể gọi `t3lab_narrate` (goal, tasks, step, done) để bảng hiện kế hoạch; không gọi thì bảng vẫn hiện từng tool.
-- Lựa chọn lưu ở `%APPDATA%\T3LabCAD\agent_cursors.json`. Đóng palette = tắt Agent Cursors. Mọi lỗi của phần hiển thị chỉ ghi log, không làm hỏng lời gọi tool.
+- Lựa chọn lưu ở `%APPDATA%\T3LabCAD\agent_cursors.json`. Nút X chỉ đóng bảng: `T3CURSORS` mở lại, gõ khi bảng đang mở thì tắt hẳn. Bước đọc / xem chỉ di chuyển con trỏ (không khung, không zoom). "Select touched" chỉ chọn đối tượng AI đã sửa trong bản vẽ và space đang mở. Mọi lỗi của phần hiển thị chỉ ghi log, không làm hỏng lời gọi tool.
 
 Ý tưởng con trỏ nhiều agent tham khảo từ [swarm-cursors](https://github.com/thanhtranarch/swarm-cursors) (chỉ lấy ý tưởng, không dùng mã).
 

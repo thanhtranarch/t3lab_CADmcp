@@ -59,7 +59,7 @@ namespace T3LabCAD.Core
             else if (type == "area" || type == "length" || type == "object")
             {
                 ObjectId id = Acad.Id(c.Db, f.ReqStr("handle"));
-                string property = type == "area" ? "Area" : type == "length" ? "Length" : f.ReqStr("property");
+                string property = type == "object" ? f.ReqStr("property") : PropertyFor(c, id, type);
                 if (format == null && (type == "area" || type == "length"))
                 {
                     format = "%lu2%pr" + Math.Max(0, Math.Min(8, f.Int("precision", 2)));
@@ -73,6 +73,22 @@ namespace T3LabCAD.Core
                 throw new ToolError("field type must be filename, date, savedate, plotdate, author, title, subject, keywords, area, length, object or code.");
             }
             return (f.Str("prefix") ?? "") + inner + (f.Str("suffix") ?? "");
+        }
+
+        /// <summary>The AcObjProp property holding the length / area of this entity type (circles: Circumference, arcs: ArcLength).</summary>
+        static string PropertyFor(ToolContext c, ObjectId id, string type)
+        {
+            DBObject o = c.Tr.GetObject(id, OpenMode.ForRead);
+            if (type == "area")
+            {
+                if (o is Polyline || o is Polyline2d || o is Circle || o is Ellipse || o is Hatch || o is Region || o is Spline) return "Area";
+                throw new ToolError($"An area field needs a polyline, circle, ellipse, hatch, region or spline, not {o.GetRXClass().DxfName}.");
+            }
+            if (o is Line || o is Polyline || o is Polyline2d || o is Polyline3d) return "Length";
+            if (o is Arc) return "ArcLength";
+            if (o is Circle) return "Circumference";
+            throw new ToolError($"A length field needs a line, polyline, arc or circle, not {o.GetRXClass().DxfName} " +
+                                "(use type=object with a property, or measure for a fixed value).");
         }
 
         /// <summary>Put a field on a text / mtext that is already in the drawing.</summary>

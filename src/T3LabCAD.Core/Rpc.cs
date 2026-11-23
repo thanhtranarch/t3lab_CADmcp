@@ -78,24 +78,36 @@ namespace T3LabCAD.Core
             object value = null;
             try
             {
-                if (step != null && AgentCursors.Paused && def.Kind != ToolKind.Read)
+                if (AgentCursors.Blocks(def, args))
                 {
                     refused = true;
-                    throw new ToolError("The user paused AI changes in AutoCAD (T3Lab Agent Cursors bar). Read-only tools still work; " +
-                                        "ask the user to press Resume, then try again.");
+                    throw new ToolError(AgentCursors.PausedMessage);
                 }
-                bool capture = step != null && def.Kind != ToolKind.Read;
+                bool capture = step != null && AgentCursors.Captures(def);
                 if (def.Background)
                 {
-                    AgentCursors.Capture watch = capture ? Entry.Main.Run(() => StartCapture(step)) : null;
+                    AgentCursors.Capture watch = capture ? OnMainOrNull(() => StartCapture(step)) : null;
                     try { value = def.Handler(null, args); }
-                    finally { if (watch != null) Entry.Main.Run(() => { watch.Dispose(); return 0; }); }
+                    finally { if (watch != null) EndCapture(watch); }
                 }
                 else
                 {
                     value = Entry.Main.Run(() =>
                     {
-                        using (capture ? StartCapture(step) : null) return Execute(def, args);
+                        // Pause pressed while this call waited for the main thread
+                        if (AgentCursors.Blocks(def, args))
+                        {
+                            refused = true;
+                            throw new ToolError(AgentCursors.PausedMessage);
+                        }
+                        AgentCursors.Capture watch = null;
+                        if (capture)
+                        {
+                            try { watch = StartCapture(step); }
+                            catch (Exception ex) { Log.Error("agent cursors capture: " + ex.Message); }
+                        }
+                        try { return Execute(def, args); }
+                        finally { watch?.Dispose(); }
                     }, applicationContext: def.Kind == ToolKind.App);
                 }
                 ok = true;
@@ -130,6 +142,28 @@ namespace T3LabCAD.Core
             }
         }
 
+        /// <summary>Agent Cursors set-up for a background tool: on the main thread, but never fails or delays the call much.</summary>
+        static T OnMainOrNull<T>(Func<T> fn) where T : class
+        {
+            try { return Entry.Main.Run(fn, 5000); }
+            catch (Exception ex)
+            {
+                Log.Error("agent cursors capture: " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>Ends a background tool's capture; if the main thread is not free, later (Dispose runs once).</summary>
+        static void EndCapture(AgentCursors.Capture watch)
+        {
+            try { Entry.Main.Run(() => { watch.Dispose(); return 0; }, 5000); }
+            catch (Exception ex)
+            {
+                Log.Error("agent cursors capture: " + ex.Message);
+                Entry.Main?.Post(watch.Dispose);
+            }
+        }
+
         /// <summary>Watch the active drawing for what a writing call creates, changes and erases (Agent Cursors). Main thread.</summary>
         static AgentCursors.Capture StartCapture(AgentStep step)
         {
@@ -160,6 +194,7 @@ namespace T3LabCAD.Core
                     {
                         ctx.Tr = tr;
                         result = def.Handler(ctx, args);
+                        if (def.Kind == ToolKind.Write && !ctx.NeedsRegen) ctx.NeedsRegen = Acad.AnyInBlockDefinition(doc.Database, tr, args);
                         tr.Commit();
                     }
                 }

@@ -40,7 +40,8 @@ namespace T3LabCAD.Core
                     P("new_name", Str("rename: new name")),
                     P("description", Str("save: description")),
                     P("replace", Bool("save: overwrite an existing state (default false)")),
-                    P("file", Str("export / import: .las file path"))),
+                    P("file", Str("export / import: .las file path")),
+                    P("overwrite", Bool("export: replace an existing .las file (default false)"))),
                 LayerState, tx: false);
         }
 
@@ -79,11 +80,19 @@ namespace T3LabCAD.Core
             }
 
             string device = a.Str("plotter") ?? ps.PlotConfigurationName;
-            ExportTools.Configure(ps, ps, a, device, false);
-            if (created)
+            try
             {
-                ps.AddToPlotSettingsDictionary(db);
-                tr.AddNewlyCreatedDBObject(ps, true);
+                ExportTools.Configure(ps, ps, a, device, false);
+                if (created)
+                {
+                    ps.AddToPlotSettingsDictionary(db);
+                    tr.AddNewlyCreatedDBObject(ps, true);
+                }
+            }
+            catch
+            {
+                if (created && ps.ObjectId.IsNull) ps.Dispose(); // never in the database: free it here, not on the finalizer thread
+                throw;
             }
 
             var applied = new List<object>();
@@ -186,6 +195,7 @@ namespace T3LabCAD.Core
                     RequireExisting();
                     string file = DocumentTools.ResolvePath(a.ReqStr("file"), ".las");
                     if (!Directory.Exists(Path.GetDirectoryName(file))) throw new ToolError($"Folder not found: {Path.GetDirectoryName(file)}");
+                    if (File.Exists(file) && !a.Bool("overwrite", false)) throw new ToolError($"{file} already exists. Pass overwrite=true to replace it.");
                     lsm.ExportLayerState(name, file);
                     return new Dictionary<string, object> { ["exported"] = name, ["file"] = file };
                 }

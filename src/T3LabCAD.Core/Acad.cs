@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Autodesk.AutoCAD.Colors;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -93,6 +94,28 @@ namespace T3LabCAD.Core
             if (btr.IsFromExternalReference || btr.IsDependent) throw new ToolError($"'{name}' comes from an xref and cannot be edited here.");
             if (btr.IsAnonymous) throw new ToolError($"'{name}' is an anonymous block.");
             return btr.ObjectId;
+        }
+
+        /// <summary>
+        /// A write on these handles touched a block definition (space block:NAME): its inserts only redraw after a regen.
+        /// Erased entities count too (delete_entities). Never throws.
+        /// </summary>
+        public static bool AnyInBlockDefinition(Database db, Transaction tr, Args a)
+        {
+            try
+            {
+                if (!a.Has("handles")) return false;
+                foreach (string h in a.Strs("handles").Take(50))
+                {
+                    if (!long.TryParse((h ?? "").Trim(), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out long value)) continue;
+                    if (!db.TryGetObjectId(new Handle(value), out ObjectId id) || !id.IsValid) continue;
+                    if (tr.GetObject(id, OpenMode.ForRead, true) is Entity e &&
+                        tr.GetObject(e.OwnerId, OpenMode.ForRead) is BlockTableRecord owner && !owner.IsLayout)
+                        return true;
+                }
+            }
+            catch (Exception) { /* only a display question */ }
+            return false;
         }
 
         /// <summary>One space, or every layout (model + paper) for "all".</summary>

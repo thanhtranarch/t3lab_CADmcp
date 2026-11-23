@@ -8,6 +8,7 @@ using Autodesk.AutoCAD.GraphicsInterface;
 using Polyline = Autodesk.AutoCAD.DatabaseServices.Polyline;
 using AcColor = Autodesk.AutoCAD.Colors.Color;
 using SysColor = System.Drawing.Color;
+using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
 namespace T3LabCAD.Core
 {
@@ -16,6 +17,9 @@ namespace T3LabCAD.Core
     /// pointer with a tag ("Claude · Moving 12 entities") that glides to the work; a frame round each entity it touched (green =
     /// created, the app's colour = changed, red cross = erased), with "TYPE · layer". Frames fade after a few seconds, pointers
     /// after the app is idle. Main thread only.
+    /// TransientManager.CurrentTransientManager follows the active drawing, so everything is erased before that drawing stops
+    /// being active (DocumentToBeDeactivated / ToBeDestroyed). A transient that could not be erased is never disposed (the
+    /// drawing may still draw it): it is kept alive instead.
     /// </summary>
     internal sealed class CursorOverlay : IDisposable
     {
@@ -24,6 +28,7 @@ namespace T3LabCAD.Core
 
         static readonly IntegerCollection AllViewports = new IntegerCollection();
         static readonly SysColor Created = SysColor.FromArgb(0x14, 0xAE, 0x5C), Erased = SysColor.FromArgb(0xF2, 0x48, 0x22);
+        static readonly List<Entity> Orphans = new List<Entity>();
 
         sealed class Pointer
         {
@@ -39,6 +44,7 @@ namespace T3LabCAD.Core
         readonly Queue<Tuple<string, SysColor, AgentStep, List<ObjectId>>> _replay = new Queue<Tuple<string, SysColor, AgentStep, List<ObjectId>>>();
         DateTime _boxesUntil, _pointersUntil, _nextReplay;
         Document _doc;
+        ObjectId _textStyle; // text in transients needs a style of the drawing
 
         public CursorOverlay()
         {
@@ -47,7 +53,21 @@ namespace T3LabCAD.Core
                 try { Tick(); }
                 catch (Exception ex) { Log.Error("agent cursors tick: " + ex.Message); Clear(); }
             };
+            AcApp.DocumentManager.DocumentToBeDeactivated += OnLeaving;
+            AcApp.DocumentManager.DocumentToBeDestroyed += OnLeaving;
         }
+
+        /// <summary>Still the active drawing: its transient manager is the current one.</summary>
+        void OnLeaving(object sender, DocumentCollectionEventArgs e)
+        {
+            try
+            {
+                if (_doc != null && e.Document == _doc) Clear();
+            }
+            catch (Exception ex) { Log.Error("agent cursors leave: " + ex.Message); }
+        }
+
+        bool OnActiveDocument() => _doc != null && AcApp.DocumentManager.MdiActiveDocument == _doc;
 
         static TransientManager Tm => TransientManager.CurrentTransientManager;
 
@@ -71,10 +91,17 @@ namespace T3LabCAD.Core
 
         void Erase(List<Entity> items)
         {
+            bool current = OnActiveDocument();
             foreach (Entity e in items)
             {
-                try { Tm.EraseTransient(e, AllViewports); } catch (Exception) { /* the drawing changed */ }
-                e.Dispose();
+                bool erased = false;
+                if (current)
+                {
+                    try { erased = Tm.EraseTransient(e, AllViewports); }
+                    catch (Exception) { /* not shown any more */ }
+                }
+                if (erased) e.Dispose();
+                else Orphans.Add(e); // maybe still drawn by another drawing: never free it
             }
             items.Clear();
         }
@@ -93,42 +120,56 @@ namespace T3LabCAD.Core
         public void Dispose()
         {
             Clear();
+            _doc = null;
+            try
+            {
+                AcApp.DocumentManager.DocumentToBeDeactivated -= OnLeaving;
+                AcApp.DocumentManager.DocumentToBeDestroyed -= OnLeaving;
+            }
+            catch (Exception) { /* AutoCAD is closing */ }
             _timer.Dispose();
         }
 
         // ---------------------------------------------------------------- one step
 
-        public void Show(Document doc, string agent, SysColor color, AgentStep step, List<ObjectId> targets)
+        /// <summary>One step: frames round its targets (frames=false: only the pointer moves, for reads and view changes).</summary>
+        public void Show(Document doc, string agent, SysColor color, AgentStep step, List<ObjectId> targets, bool frames)
         {
             if (_doc != doc) Clear();
             _doc = doc;
+            if (!OnActiveDocument()) return;
             ClearBoxes();
             double u = Unit(doc);
             var boxes = new List<Tuple<Extents3d, SysColor, string>>();
-            var created = new HashSet<ObjectId>(step.Created);
+            var created = new HashSet<string>(step.Created, StringComparer.OrdinalIgnoreCase); // main thread, like every writer
             SysColor tint = step.Action == ActionKind.Read ? ActivityView.ActionColor(ActionKind.Read) : color;
             var union = new Extents3d();
             bool any = false;
+            _textStyle = doc.Database.Textstyle;
             using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
             {
                 foreach (ObjectId id in targets)
                 {
                     if (!(tr.GetObject(id, OpenMode.ForRead) is Entity ent)) continue;
-                    Extents3d? b = ent.Bounds;
+                    Extents3d? b;
+                    try { b = ent.Bounds; } catch (Exception) { continue; }
                     if (!b.HasValue) continue;
                     if (any) union.AddExtents(b.Value); else union = b.Value;
                     any = true;
                     if (boxes.Count < MaxBoxes)
-                        boxes.Add(Tuple.Create(b.Value, created.Contains(id) ? Created : tint, ent.GetRXClass().DxfName + " · " + ent.Layer));
+                        boxes.Add(Tuple.Create(b.Value, created.Contains(id.Handle.ToString()) ? Created : tint, ent.GetRXClass().DxfName + " · " + ent.Layer));
                 }
                 tr.Commit();
             }
-            foreach (var b in boxes) Frame(b.Item1, b.Item2, b.Item3, u, false);
-            if (targets.Count > MaxBoxes && any) Frame(union, tint, $"×{targets.Count} · {step.Action}", u, false);
-            foreach (Extents3d gone in step.ErasedBoxes.Take(MaxBoxes)) Frame(gone, Erased, "erased", u, true);
+            if (frames)
+            {
+                foreach (var b in boxes) Frame(b.Item1, b.Item2, b.Item3, u, false);
+                if (targets.Count > MaxBoxes && any) Frame(union, tint, $"×{targets.Count} · {step.Action}", u, false);
+                foreach (Extents3d gone in step.ErasedBoxes.Take(MaxBoxes)) Frame(gone, Erased, "erased", u, true);
+            }
 
             Point3d? target = boxes.Count > 0 ? TopLeft(boxes[boxes.Count - 1].Item1, u)
-                : step.ErasedBoxes.Count > 0 ? TopLeft(step.ErasedBoxes[0], u) : (Point3d?)null;
+                : frames && step.ErasedBoxes.Count > 0 ? TopLeft(step.ErasedBoxes[0], u) : (Point3d?)null;
             MovePointer(agent, color, $"{agent} · {step.Caption}", target, u);
             _boxesUntil = DateTime.Now.AddSeconds(BoxHoldS);
             _pointersUntil = DateTime.Now.AddSeconds(CursorHoldS);
@@ -157,6 +198,7 @@ namespace T3LabCAD.Core
             }
             var text = new DBText
             {
+                TextStyleId = _textStyle,
                 TextString = label,
                 Height = u * 0.45,
                 Position = new Point3d(min.X - pad, max.Y + pad + u * 0.2, 0),
@@ -198,6 +240,7 @@ namespace T3LabCAD.Core
             Add(tail, p.Parts);
             var label = new MText
             {
+                TextStyleId = _textStyle,
                 Contents = tag.Replace("\\", "\\\\").Replace("{", "\\{").Replace("}", "\\}"),
                 TextHeight = u * 0.5,
                 Location = new Point3d(o.X + 1.25 * u, o.Y - 1.1 * u, 0),
@@ -214,6 +257,11 @@ namespace T3LabCAD.Core
         void Tick()
         {
             DateTime now = DateTime.Now;
+            if (!OnActiveDocument())
+            {
+                Clear(); // its drawing is not active: nothing of it can be updated
+                return;
+            }
             foreach (Pointer p in _pointers.Values)
             {
                 if (!p.Gliding) continue;
@@ -236,7 +284,7 @@ namespace T3LabCAD.Core
             if (_replay.Count > 0 && now >= _nextReplay && _doc != null)
             {
                 var next = _replay.Dequeue();
-                Show(_doc, next.Item1, next.Item2, next.Item3, next.Item4);
+                Show(_doc, next.Item1, next.Item2, next.Item3, next.Item4, true);
                 _nextReplay = now.AddMilliseconds(ReplayStepMs);
             }
             if (_boxes.Count > 0 && now > _boxesUntil && _replay.Count == 0) ClearBoxes();
@@ -267,7 +315,9 @@ namespace T3LabCAD.Core
             {
                 foreach (ObjectId id in ids)
                 {
-                    Extents3d? b = (tr.GetObject(id, OpenMode.ForRead) as Entity)?.Bounds;
+                    Extents3d? b;
+                    try { b = (tr.GetObject(id, OpenMode.ForRead) as Entity)?.Bounds; }
+                    catch (Exception) { continue; }
                     if (!b.HasValue) continue;
                     if (any) ext.AddExtents(b.Value); else ext = b.Value;
                     any = true;
