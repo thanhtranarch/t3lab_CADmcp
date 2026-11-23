@@ -24,17 +24,25 @@ namespace T3LabCAD.Core
                 "arc {center, radius, start_angle, end_angle} or {points: [p1, p2, p3]}; ellipse {center, major_axis [dx, dy], ratio}; point {position}; " +
                 "text {position, text, height, rotation, align (left, center, right, middle_center, top_left...), style}; " +
                 "mtext {position, text (\\\\n for new line), height, width, rotation, attachment (top_left...), style}; " +
+                "attdef {position, tag, prompt, default, height, rotation, invisible, style} (attribute definition, for create_block); " +
                 "insert {block, position, scale, rotation, attributes {TAG: value}, block_file (a .dwg imported as the block when missing)}; " +
                 "dim_aligned {p1, p2, dim_point, text, style}; dim_linear {p1, p2, dim_point, rotation (0 horizontal, 90 vertical), text, style}; " +
-                "hatch {points (closed polygon) or boundary_handles, pattern (SOLID, ANSI31...), scale, angle}; spline {points}. " +
+                "hatch {points (closed polygon) or boundary_handles, pattern (SOLID, ANSI31...), scale, angle}; spline {points}; " +
+                "table {position (top left), rows [[cell...]...], title, header (first row is a header, default true), col_widths (number or list), " +
+                "row_height, text_height, style}; mleader {points [arrow, ..., landing], text, text_height, style}; " +
+                "dim_radius / dim_diameter {handle (circle or arc) + angle, or center + chord_point; leader_length}; " +
+                "dim_angular {center, p1, p2, arc_point}; dim_arc {handle (arc) or center, p1, p2, arc_point}; " +
+                "dim_ordinate {point, leader_end, axis x or y, origin}; dim_chain {points, dim_point, rotation, mode continue or baseline, spacing}. " +
                 "Angles in degrees CCW; height defaults to TEXTSIZE.",
                 ObjR("items", Space,
-                    P("items", Arr("Entities to create", "{'type':'object','properties':{'type':{'type':'string','enum':['line','polyline','rectangle','circle','arc','ellipse','point','text','mtext','insert','dim_aligned','dim_linear','hatch','spline']}},'required':['type']}"))),
+                    P("items", Arr("Entities to create", "{'type':'object','properties':{'type':{'type':'string','enum':['line','polyline','rectangle','circle','arc','ellipse','point','text','mtext','attdef','insert','dim_aligned','dim_linear','hatch','spline','table','mleader','dim_radius','dim_diameter','dim_angular','dim_arc','dim_ordinate','dim_chain']}},'required':['type']}"))),
                 AddEntities);
 
             Registry.Add("update_entities", "Modify entities", ToolKind.Write,
                 "Change properties of entities. Either handles + set (same change for all) or items [{handle, ...props}]. " +
-                "Props: layer, color, linetype, lineweight, text, height, rotation, position, start, end, center, radius, closed, width, scale, attributes {TAG: value}. " +
+                "Props: layer, color, linetype, lineweight, text, height, rotation, position, start, end, center, radius, closed, width, scale, attributes {TAG: value}, " +
+                "dynamic_props {NAME: value} (dynamic blocks; angles in degrees; lists take one of the allowed values), points + bulges (polyline vertices), " +
+                "cells [{row, col, text}] (tables, 0-based), draw_order (top or bottom). " +
                 "Props that do not apply to an entity type are reported in skipped.",
                 Obj(Handles,
                     P("set", ObjAny("Properties to apply to every handle")),
@@ -96,6 +104,18 @@ namespace T3LabCAD.Core
                 string type = (item.Str("type") ?? "").Trim().ToLowerInvariant();
                 try
                 {
+                    if (type == "dim_chain")
+                    {
+                        List<Entity> dims = Annotation.Chain(c, space, item);
+                        created.Add(new Dictionary<string, object>
+                        {
+                            ["index"] = i,
+                            ["type"] = type,
+                            ["handle"] = dims[0].Handle.ToString(),
+                            ["handles"] = dims.Select(d => (object)d.Handle.ToString()).ToList(),
+                        });
+                        continue;
+                    }
                     Entity e = Create(c, space, type, item);
                     created.Add(new Dictionary<string, object> { ["index"] = i, ["type"] = type, ["handle"] = e.Handle.ToString() });
                 }
@@ -209,6 +229,23 @@ namespace T3LabCAD.Core
                     return Add(c, space, m, it);
                 }
 
+                case "attdef":
+                {
+                    string tag = it.ReqStr("tag").Trim();
+                    if (tag.Length == 0 || tag.IndexOf(' ') >= 0) throw new ToolError("tag must be one word, e.g. ROOM_NAME.");
+                    var ad = new AttributeDefinition();
+                    ad.SetDatabaseDefaults(db);
+                    ad.Position = it.ReqPt("position");
+                    ad.Tag = tag.ToUpperInvariant();
+                    ad.Prompt = it.Str("prompt") ?? tag;
+                    ad.TextString = it.Str("default") ?? "";
+                    ad.Height = Positive(it.Num("height", db.Textsize), "height");
+                    ad.Rotation = Rad(it.Num("rotation", 0));
+                    ad.TextStyleId = Acad.TextStyle(db, tr, it.Str("style"));
+                    ad.Invisible = it.Bool("invisible", false);
+                    return Add(c, space, ad, it);
+                }
+
                 case "insert":
                     return Insert(c, space, it);
 
@@ -231,7 +268,9 @@ namespace T3LabCAD.Core
                 }
 
                 default:
-                    throw new ToolError("Unknown type. Use line, polyline, rectangle, circle, arc, ellipse, point, text, mtext, insert, dim_aligned, dim_linear, hatch or spline.");
+                    return Annotation.Create(c, space, type, it) ?? throw new ToolError(
+                        "Unknown type. Use line, polyline, rectangle, circle, arc, ellipse, point, text, mtext, attdef, insert, dim_aligned, dim_linear, " +
+                        "hatch, spline, " + string.Join(", ", Annotation.Types) + ".");
             }
         }
 
@@ -247,9 +286,27 @@ namespace T3LabCAD.Core
             return "";
         }
 
+        internal static Entity AddToSpace(ToolContext c, BlockTableRecord space, Entity e, Args it) => Add(c, space, e, it);
+
         static Entity Add(ToolContext c, BlockTableRecord space, Entity e, Args it)
         {
-            if (!(e is DBText) && !(e is MText)) e.SetDatabaseDefaults(c.Db);
+            switch (e)
+            {
+                case DBText _:
+                case MText _:
+                case Table _:
+                case MLeader _:
+                    break; // defaults were set before their own style / height
+                case Dimension dim:
+                    // SetDatabaseDefaults can put a dimension back on the current style
+                    ObjectId style = dim.DimensionStyle;
+                    e.SetDatabaseDefaults(c.Db);
+                    if (!style.IsNull && dim.DimensionStyle != style) dim.DimensionStyle = style;
+                    break;
+                default:
+                    e.SetDatabaseDefaults(c.Db);
+                    break;
+            }
             foreach (string key in CommonKeys)
                 if (it.Has(key)) Acad.ApplyCommon(e, key, it.Raw(key), c.Db, c.Tr);
             Acad.Append(space, e, c.Tr);
@@ -262,7 +319,7 @@ namespace T3LabCAD.Core
             return v;
         }
 
-        static string MTextContents(string text) => text.Replace("\r\n", "\\P").Replace("\n", "\\P");
+        internal static string MTextContents(string text) => text.Replace("\r\n", "\\P").Replace("\n", "\\P");
 
         /// <summary>Returns true when the text is not left/baseline justified (AlignmentPoint is used).</summary>
         static bool SetJustification(DBText t, string align)
@@ -570,6 +627,39 @@ namespace T3LabCAD.Core
                     else bs.ScaleFactors = target;
                     return true;
 
+                case "dynamic_props":
+                    if (!(e is BlockReference bd) || !bd.IsDynamicBlock) return false;
+                    SetDynamicProperties(bd, s.Raw(rawKey));
+                    return true;
+
+                case "points":
+                    if (!(e is Polyline pv)) return false;
+                    SetVertices(pv, s.Pts(rawKey), s.Has("bulges") ? s.List("bulges") : null);
+                    return true;
+
+                case "bulges":
+                    if (!(e is Polyline pb)) return false;
+                    if (s.Has("points")) return true; // applied with the points
+                    IList bulgeList = s.List(rawKey);
+                    if (bulgeList.Count != pb.NumberOfVertices) throw new ToolError($"bulges needs {pb.NumberOfVertices} values (one per vertex).");
+                    for (int i = 0; i < pb.NumberOfVertices; i++) pb.SetBulgeAt(i, Args.ToDouble(bulgeList[i], "bulges"));
+                    return true;
+
+                case "cells":
+                    if (!(e is Table tb)) return false;
+                    SetCells(tb, s.Raw(rawKey));
+                    return true;
+
+                case "draw_order":
+                    string where = (s.Str(rawKey) ?? "").Trim().ToLowerInvariant();
+                    var owner = (BlockTableRecord)c.Tr.GetObject(e.OwnerId, OpenMode.ForRead);
+                    var order = (DrawOrderTable)c.Tr.GetObject(owner.DrawOrderTableId, OpenMode.ForWrite);
+                    var one = new ObjectIdCollection { e.ObjectId };
+                    if (where == "top") order.MoveToTop(one);
+                    else if (where == "bottom") order.MoveToBottom(one);
+                    else throw new ToolError("draw_order must be top or bottom.");
+                    return true;
+
                 case "attributes":
                     if (!(e is BlockReference ba)) return false;
                     Dictionary<string, string> values = Values(s.Raw(rawKey));
@@ -590,6 +680,103 @@ namespace T3LabCAD.Core
                 default:
                     return false;
             }
+        }
+
+        /// <summary>Dynamic block properties by name; angles are given in degrees, list properties take an allowed value.</summary>
+        static void SetDynamicProperties(BlockReference br, object raw)
+        {
+            if (!(raw is Dictionary<string, object> values)) throw new ToolError("dynamic_props must be an object {NAME: value}.");
+            var props = br.DynamicBlockReferencePropertyCollection.Cast<DynamicBlockReferenceProperty>()
+                .Where(p => p.PropertyName != "Origin").ToList();
+            foreach (var kv in values)
+            {
+                DynamicBlockReferenceProperty prop = props.FirstOrDefault(p => p.PropertyName.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new ToolError($"No dynamic property '{kv.Key}'. Properties: {string.Join(", ", props.Select(p => p.PropertyName))}.");
+                if (prop.ReadOnly) throw new ToolError($"Dynamic property '{prop.PropertyName}' is read-only.");
+                bool angular = prop.UnitsType == DynamicBlockReferencePropertyUnitsType.Angular;
+                object current = prop.Value;
+                object[] allowed = prop.GetAllowedValues() ?? new object[0];
+                object value;
+                if (allowed.Length > 0)
+                {
+                    value = allowed.FirstOrDefault(v => SameValue(v, kv.Value, angular))
+                        ?? throw new ToolError($"'{kv.Value}' is not allowed for {prop.PropertyName}. Allowed: " +
+                                               string.Join(", ", allowed.Select(v => v is double d && angular ? Deg(d).ToString(System.Globalization.CultureInfo.InvariantCulture) : Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture))) + ".");
+                }
+                else if (current is double)
+                {
+                    double d = Args.ToDouble(kv.Value, prop.PropertyName);
+                    value = angular ? Rad(d) : d;
+                }
+                else if (current is short) value = (short)Math.Round(Args.ToDouble(kv.Value, prop.PropertyName));
+                else if (current is int) value = (int)Math.Round(Args.ToDouble(kv.Value, prop.PropertyName));
+                else value = Convert.ToString(kv.Value, System.Globalization.CultureInfo.InvariantCulture);
+                try { prop.Value = value; }
+                catch (AcRx.Exception ae) { throw new ToolError($"AutoCAD refused {prop.PropertyName} = {kv.Value} ({ae.ErrorStatus})."); }
+            }
+        }
+
+        static bool SameValue(object allowed, object given, bool angular)
+        {
+            if (allowed is double d)
+            {
+                try { return Math.Abs((angular ? Deg(d) : d) - Args.ToDouble(given, "value")) < 1e-6; }
+                catch (ToolError) { return false; }
+            }
+            return string.Equals(Convert.ToString(allowed, System.Globalization.CultureInfo.InvariantCulture),
+                Convert.ToString(given, System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Replace a polyline's vertices in place (a polyline always keeps at least 2).</summary>
+        static void SetVertices(Polyline pl, List<Point3d> pts, IList bulges)
+        {
+            if (pts.Count < 2) throw new ToolError("A polyline needs at least 2 points.");
+            if (bulges != null && bulges.Count != pts.Count) throw new ToolError("bulges must have one value per point.");
+            for (int i = 0; i < pts.Count; i++)
+            {
+                var p = new Point2d(pts[i].X, pts[i].Y);
+                double bulge = bulges == null ? 0 : Args.ToDouble(bulges[i], "bulges");
+                if (i < pl.NumberOfVertices)
+                {
+                    pl.SetPointAt(i, p);
+                    pl.SetBulgeAt(i, bulge);
+                }
+                else pl.AddVertexAt(i, p, bulge, 0, 0);
+            }
+            for (int i = pl.NumberOfVertices - 1; i >= pts.Count; i--) pl.RemoveVertexAt(i);
+        }
+
+        /// <summary>cells: [{row, col, text}] or {"row,col": text}, 0-based.</summary>
+        static void SetCells(Table tb, object raw)
+        {
+            var edits = new List<Tuple<int, int, string>>();
+            if (raw is Dictionary<string, object> map)
+            {
+                foreach (var kv in map)
+                {
+                    string[] rc = kv.Key.Split(',');
+                    if (rc.Length != 2 || !int.TryParse(rc[0].Trim(), out int r) || !int.TryParse(rc[1].Trim(), out int col))
+                        throw new ToolError($"cells key '{kv.Key}' must be \"row,col\".");
+                    edits.Add(Tuple.Create(r, col, Convert.ToString(kv.Value ?? "")));
+                }
+            }
+            else if (raw is IList list)
+            {
+                foreach (object o in list)
+                {
+                    var cell = new Args(o);
+                    edits.Add(Tuple.Create(cell.Int("row", -1), cell.Int("col", -1), cell.Str("text") ?? ""));
+                }
+            }
+            else throw new ToolError("cells must be [{row, col, text}] or {\"row,col\": text}.");
+
+            foreach (var edit in edits)
+            {
+                if (edit.Item1 < 0 || edit.Item1 >= tb.Rows.Count || edit.Item2 < 0 || edit.Item2 >= tb.Columns.Count)
+                    throw new ToolError($"Cell ({edit.Item1}, {edit.Item2}) is outside the table ({tb.Rows.Count} rows x {tb.Columns.Count} columns, 0-based).");
+                tb.Cells[edit.Item1, edit.Item2].TextString = edit.Item3;
+            }
+            tb.GenerateLayout();
         }
 
         static object DeleteEntities(ToolContext c, Args a)
