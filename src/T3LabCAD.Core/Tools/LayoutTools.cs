@@ -94,7 +94,7 @@ namespace T3LabCAD.Core
             return value;
         }
 
-        static string ScaleText(double scale) =>
+        internal static string ScaleText(double scale) =>
             scale >= 1 ? $"{Geo.R(scale)}:1" : $"1:{Geo.R(1 / scale)}";
 
         static object AddViewport(ToolContext c, Args a)
