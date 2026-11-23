@@ -79,6 +79,8 @@ namespace T3LabCAD.Core
             ModifyTools.Register();
             FieldTools.Register();
             XrefTools.Register();
+            ReferenceTools.Register();
+            CivilTools.Register();
             ViewTools.Register();
             CommandTools.Register();
         }
