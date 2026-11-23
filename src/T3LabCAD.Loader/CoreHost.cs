@@ -32,6 +32,14 @@ namespace T3LabCAD.Loader
             _entry?.GetMethod("Stop").Invoke(null, null);
         }
 
+        /// <summary>T3CURSORS: Agent Cursors on / off (Entry.ToggleAgentCursors, added in Core 1.4).</summary>
+        internal static string ToggleAgentCursors()
+        {
+            MethodInfo toggle = _entry?.GetMethod("ToggleAgentCursors");
+            if (toggle == null) return _entry == null ? "T3LabCAD MCP: not loaded" : "This T3LabCAD.Core has no Agent Cursors (update it).";
+            return (string)toggle.Invoke(null, null);
+        }
+
         internal static string Status()
         {
             return _entry == null ? "T3LabCAD MCP: not loaded" : (string)_entry.GetMethod("Status").Invoke(null, null);

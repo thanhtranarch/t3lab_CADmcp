@@ -18,7 +18,7 @@
     <!-- Outside the project folders: per-series obj dirs would otherwise be compiled by the default globs. -->
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)..\obj\$(MSBuildProjectName)\$(AcadSeries)\</BaseIntermediateOutputPath>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <Company>T3Lab</Company>
     <Product>T3Lab CAD MCP</Product>
     <Copyright>T3Lab</Copyright>

@@ -14,9 +14,9 @@ namespace T3LabCAD.Core
     internal static class NamedObjectTools
     {
         static readonly string[] ListKinds =
-            { "layer", "block", "layout", "text_style", "dim_style", "linetype", "view", "ucs", "group", "mleader_style", "table_style", "xref" };
+            { "layer", "block", "layout", "text_style", "dim_style", "linetype", "view", "ucs", "group", "mleader_style", "table_style", "page_setup", "xref" };
         static readonly string[] EditKinds =
-            { "layer", "block", "layout", "text_style", "dim_style", "linetype", "view", "ucs", "group", "mleader_style", "table_style" };
+            { "layer", "block", "layout", "text_style", "dim_style", "linetype", "view", "ucs", "group", "mleader_style", "table_style", "page_setup" };
         static readonly string[] PurgeKinds =
             { "block", "layer", "linetype", "text_style", "dim_style", "mleader_style", "table_style", "regapp" };
 
@@ -25,7 +25,8 @@ namespace T3LabCAD.Core
             Registry.Add("list_named_objects", "List named objects", ToolKind.Read,
                 "Named objects of the active drawing by kind: text_style (font, height, width factor), dim_style (main DIM variables, " +
                 "full=true for all), linetype, view, ucs, group (entity handles), mleader_style, table_style, xref (path and status: " +
-                "loaded, unloaded, not_found...). layer, block and layout return the same as list_layers, list_blocks and list_layouts.",
+                "loaded, unloaded, not_found...), page_setup (plotter, paper, plot style, scale). layer, block and layout return the same as " +
+                "list_layers, list_blocks and list_layouts.",
                 ObjR("kind",
                     P("kind", Enum("Kind of object", ListKinds)),
                     P("name", Str("Wildcard filter, e.g. A-*")),
@@ -35,7 +36,7 @@ namespace T3LabCAD.Core
                 ListNamed);
 
             Registry.Add("rename_object", "Rename named object", ToolKind.Write,
-                "Rename a layer, block, layout, text style, dimension style, linetype, named view, UCS, group, multileader style or table style. " +
+                "Rename a layer, block, layout, text style, dimension style, linetype, named view, UCS, group, multileader style, table style or page setup. " +
                 "Layer 0 / Defpoints, Model, Standard styles, ByLayer / ByBlock / Continuous and xref-dependent names (XREF|NAME) cannot be renamed.",
                 ObjR("kind,name,new_name",
                     P("kind", Enum("Kind of object", EditKinds)),
@@ -96,6 +97,7 @@ namespace T3LabCAD.Core
                 case "text_style": return "text style";
                 case "dim_style": return "dimension style";
                 case "mleader_style": return "multileader style";
+                case "page_setup": return "page setup";
                 case "table_style": return "table style";
                 case "ucs": return "UCS";
                 case "regapp": return "registered application";
@@ -126,6 +128,7 @@ namespace T3LabCAD.Core
                 case "group": return db.GroupDictionaryId;
                 case "mleader_style": return db.MLeaderStyleDictionaryId;
                 case "table_style": return db.TableStyleDictionaryId;
+                case "page_setup": return db.PlotSettingsDictionaryId;
                 default: return ObjectId.Null;
             }
         }
@@ -326,6 +329,14 @@ namespace T3LabCAD.Core
                     }
                     break;
 
+                case "page_setup":
+                    foreach (DBDictionaryEntry entry in (DBDictionary)tr.GetObject(db.PlotSettingsDictionaryId, OpenMode.ForRead))
+                    {
+                        if (filter != null && !Wild.Match(entry.Key, filter)) continue;
+                        if (tr.GetObject(entry.Value, OpenMode.ForRead) is PlotSettings ps) items.Add(SheetTools.PageSetupInfo(ps));
+                    }
+                    break;
+
                 case "xref":
                     foreach (ObjectId id in (SymbolTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead))
                     {
@@ -376,6 +387,7 @@ namespace T3LabCAD.Core
                 {
                     if (o is MLeaderStyle ms) ms.Name = newName;
                     else if (o is TableStyle ts) ts.Name = newName;
+                    else if (o is PlotSettings ps) ps.PlotSettingsName = newName;
                 }
                 catch (AcRx.Exception) { /* the dictionary key is what AutoCAD shows */ }
             }
@@ -459,6 +471,15 @@ namespace T3LabCAD.Core
                     int members = g.NumEntities;
                     g.Erase();
                     return new Dictionary<string, object> { ["entities_kept"] = members };
+                }
+
+                case "page_setup":
+                {
+                    // layouts copy a page setup's values, they do not point at it: erasing one changes no layout
+                    var dict = (DBDictionary)tr.GetObject(db.PlotSettingsDictionaryId, OpenMode.ForRead);
+                    if (!dict.Contains(name)) throw NotFound(kind, name);
+                    tr.GetObject(dict.GetAt(name), OpenMode.ForWrite).Erase();
+                    return null;
                 }
 
                 case "mleader_style":

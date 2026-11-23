@@ -4,13 +4,14 @@ Add-in AutoCAD (giống T3Lab Revit MCP) cho phép Claude Desktop / Claude Code 
 
 - **Đọc:** truy vấn đối tượng (kèm length / area), text, attribute, layer, block, layout, style, xref; chụp màn hình để Claude xem.
 - **Đo / bóc khối lượng:** khoảng cách, góc, diện tích, giao điểm; tổng số lượng / chiều dài / diện tích theo layer, loại, block; xuất dữ liệu block ra CSV cho Excel.
-- **Vẽ / sửa:** vẽ 23 loại đối tượng (cả table, multileader, attribute definition, 8 kiểu dim), sửa thuộc tính (cả dynamic block, đỉnh polyline, ô table), move / copy / rotate / scale / mirror, offset / join / boundary, tìm và thay text, tạo block, đồng bộ attribute, explode.
-- **Quản lý:** tạo / đổi tên / xoá layer, block, layout, viewport, text style, dim style, linetype, view, group, xref; purge; lấy block / layer / style từ file khác.
+- **Vẽ / sửa:** vẽ 23 loại đối tượng (cả table, multileader, attribute definition, 8 kiểu dim, text có field), sửa thuộc tính (cả dynamic block, đỉnh polyline, ô table), move / copy / rotate / scale / mirror / align / array, offset / join / boundary / extend / trim / break / fillet / chamfer, sửa thẳng trong định nghĩa block (`space: "block:TÊN"`), tìm và thay text, tạo block, đồng bộ attribute, explode.
+- **Quản lý:** tạo / đổi tên / xoá layer, block, layout, viewport, text style, dim style, linetype, view, group, page setup, layer state, UCS, xref; purge; lấy block / layer / style từ file khác.
+- **Tham chiếu / Scan-to-BIM:** attach ảnh, PDF, DWF, DGN làm underlay; attach point cloud ReCap (.rcp / .rcs); Civil 3D: đọc alignment, profile, surface, pipe network, COGO point, cao độ trên surface, lý trình / offset; tạo COGO point và thêm điểm vào TIN surface.
 - **File:** mở, tạo, lưu (kể cả bản cũ 2018…2000), lưu bản sao, đổi tên, xoá file bản vẽ; duyệt thư mục.
-- **Xuất:** PDF / DWFx / DWF theo layout (`export_pdf`), publish nhiều bản vẽ vào 1 PDF (`publish_pdf`), DXF.
+- **Xuất:** PDF / DWFx / DWF theo layout (`export_pdf`), publish nhiều bản vẽ vào 1 PDF (`publish_pdf`), page setup, DXF, WBLOCK ra .dwg mới (`export_entities`).
 - **Lệnh:** chạy lệnh AutoCAD dạng dòng lệnh khi chưa có tool riêng.
 
-Tổng cộng **57 tool**: 55 tool chạy trong AutoCAD + 2 tool của bridge. Mỗi thay đổi là 1 bước Undo.
+Tổng cộng **67 tool**: 65 tool chạy trong AutoCAD + 2 tool của bridge. Mỗi thay đổi là 1 bước Undo. Bảng **Agent Cursors** cho xem AI đang làm gì (xem bên dưới).
 
 ```
 Claude ──stdio MCP──> bridge.py (%APPDATA%\T3LabCAD) ──TCP 127.0.0.1:48900-48908──> T3LabCAD add-in trong AutoCAD
@@ -18,7 +19,7 @@ Claude ──stdio MCP──> bridge.py (%APPDATA%\T3LabCAD) ──TCP 127.0.0.1
 
 | Phần | Vai trò |
 |---|---|
-| `src/T3LabCAD.Loader` | DLL AutoCAD load (bundle autoloader). Lệnh `T3MCPSTART / T3MCPSTOP / T3MCPSTATUS / T3MCPRELOAD`, tab ribbon **T3Lab › MCP Server**. Nạp Core từ bytes nên Core thay được khi AutoCAD đang chạy. |
+| `src/T3LabCAD.Loader` | DLL AutoCAD load (bundle autoloader). Lệnh `T3MCPSTART / T3MCPSTOP / T3MCPSTATUS / T3MCPRELOAD / T3CURSORS`, tab ribbon **T3Lab › MCP Server**. Nạp Core từ bytes nên Core thay được khi AutoCAD đang chạy. |
 | `src/T3LabCAD.Core` | Server TCP (chỉ localhost), chạy tool trên main thread của AutoCAD, mỗi thay đổi = 1 bước Undo. |
 | `bridge/t3lab_cad_bridge.py` | MCP server stdio (chỉ dùng thư viện chuẩn Python). Kết nối được cả khi AutoCAD đóng, tự cache danh sách tool, hỗ trợ nhiều AutoCAD cùng lúc. |
 
@@ -49,7 +50,7 @@ Script sẽ:
 4. Thêm server `t3lab-autocad` vào `claude_desktop_config.json` (có backup). Thêm `-ClaudeCode` để đăng ký cho Claude Code CLI (`claude mcp add --scope user`).
 
 Sau đó **khởi động lại Claude Desktop**. Trong AutoCAD gõ `T3MCPSTATUS` để kiểm tra:
-`T3LabCAD MCP v1.3.0: listening on 127.0.0.1:48900 | 55 tools | ...`
+`T3LabCAD MCP v1.4.0: listening on 127.0.0.1:48900 | 65 tools | ...`
 
 Nếu AutoCAD đang mở lúc cài lần đầu: khởi động lại AutoCAD, hoặc `NETLOAD` file `T3LabCAD.Loader.dll` trong thư mục bundle.
 
@@ -57,19 +58,23 @@ Nếu AutoCAD đang mở lúc cài lần đầu: khởi động lại AutoCAD, h
 
 | Nhóm | Tool |
 |---|---|
-| Trạng thái | `get_status`, `get_sysvars`, `set_sysvar` |
+| Trạng thái | `get_status`, `get_sysvars`, `set_sysvar`, `t3lab_narrate` (mục tiêu + các bước cho bảng Agent Cursors) |
 | Bản vẽ | `open_document` (tên không có thư mục = cạnh bản vẽ đang mở), `new_document` (`save_as`), `activate_document`, `save_document` (dwg / xuất dxf, `copy=true` lưu bản sao, `version` 2018/2013/2010/2007/2004/2000), `close_document` |
 | File | `list_drawing_files` (duyệt thư mục, đánh dấu file đang mở), `rename_document` (đổi tên file, bản vẽ đang mở được đóng → đổi tên → mở lại), `delete_drawing_file` (vào Recycle Bin, trừ khi `permanent=true`) |
 | Layout | `list_layouts`, `activate_layout`, `create_layout` (mới hoặc copy từ layout khác), `add_viewport` (vùng model + tỉ lệ 1:100), `set_viewport` (tỉ lệ, tâm, khoá, on/off, freeze layer riêng trong viewport) |
-| Export / publish | `export_pdf` (plot layout của bản vẽ đang mở ra PDF / DWFx / DWF: 1 file nhiều trang hoặc mỗi layout 1 file; đổi khổ giấy, ctb, vùng in, tỉ lệ; `list_options` liệt kê máy in, khổ giấy, ctb), `publish_pdf` (gộp layout của nhiều bản vẽ, kể cả file đang đóng, vào 1 PDF theo page setup). DXF: `save_document path=*.dxf`; ảnh PNG: `screenshot` |
+| Page setup / layer state | `set_page_setup` (tạo / sửa page setup: máy in, khổ giấy, ctb, vùng in, tỉ lệ; gán cho layout, `*` = mọi layout), `layer_state` (list, save, restore, delete, rename, export / import .las) |
+| Export / publish | `export_pdf` (plot layout của bản vẽ đang mở ra PDF / DWFx / DWF: 1 file nhiều trang hoặc mỗi layout 1 file; đổi khổ giấy, ctb, vùng in, tỉ lệ; `list_options` liệt kê máy in, khổ giấy, ctb), `publish_pdf` (gộp layout của nhiều bản vẽ, kể cả file đang đóng, vào 1 PDF theo page setup). DXF: `save_document path=*.dxf`; ảnh PNG: `screenshot`; WBLOCK: `export_entities` (entity hoặc block → .dwg mới, kèm layer / style, `version` bản cũ) |
 | Layer | `list_layers`, `set_layer` (tạo/sửa/đổi tên/on/freeze/lock/current), `delete_layer` (có `merge_into`) |
 | Style / linetype | `set_text_style` (font TrueType hoặc SHX, height, width factor, oblique), `set_dim_style` (tạo từ style gốc, đặt mọi biến DIM*, tự cập nhật dim), `load_linetype` (từ acadiso.lin, có wildcard) |
-| Đối tượng có tên | `list_named_objects`, `rename_object`, `delete_object`, `purge` — cho layer, block, layout, text_style, dim_style, linetype, view, ucs, group, mleader_style, table_style (xref chỉ list); `import_from_drawing` (lấy block / layer / style / linetype từ .dwg / .dwt khác, `replace=true` định nghĩa lại) |
-| Group / view / xref | `set_group` (tạo, thêm/bớt entity), `save_view`, `restore_view`, `attach_xref` (attach/overlay, đường dẫn tương đối), `manage_xref` (detach/reload/unload/bind/insert/repath) |
+| Đối tượng có tên | `list_named_objects`, `rename_object`, `delete_object`, `purge` — cho layer, block, layout, text_style, dim_style, linetype, view, ucs, group, mleader_style, table_style, page_setup (xref chỉ list); `import_from_drawing` (lấy block / layer / style / linetype từ .dwg / .dwt khác, `replace=true` định nghĩa lại) |
+| Group / view / xref | `set_group` (tạo, thêm/bớt entity), `save_view`, `restore_view`, `set_ucs` (get / world / set / save / restore; kèm geolocation), `attach_xref` (attach/overlay, đường dẫn tương đối), `manage_xref` (detach/reload/unload/bind/insert/repath) |
+| Underlay / point cloud | `attach_underlay` (ảnh png / jpg / tif..., trang PDF, sheet DWF / DWFx, model DGN), `attach_point_cloud` (ReCap .rcp / .rcs cho Scan-to-BIM) |
+| Civil 3D (chỉ khi chạy Civil 3D) | `civil_query` (summary, alignment, profile, surface, pipe_network, cogo_point; `elevation_at` cao độ surface tại điểm, `station_offset` lý trình / offset), `civil_points` (tạo COGO point, thêm điểm vào TIN surface, tạo surface nếu chưa có) |
 | Đọc | `query_entities` (lọc theo type, layer, block, text, màu, linetype, closed, vùng chọn, handle; `totals` cộng length / area; `detail=full` có length, area, ô table; phân trang), `get_texts` (TEXT/MTEXT/ATTRIB/MLEADER), `list_blocks`, `selection` |
 | Đo / bóc khối lượng | `measure` (distance, angle, area, length, bbox, closest, intersections), `quantity_takeoff` (số lượng / chiều dài / diện tích theo layer, loại, block; hệ số đổi đơn vị; CSV), `extract_block_data` (mỗi insert 1 dòng: vị trí, attribute, dynamic property; CSV) |
-| Vẽ / sửa | `add_entities` (line, polyline, rectangle, circle, arc, ellipse, point, text, mtext, attdef, insert + attribute, hatch, spline, table, mleader, dim_aligned, dim_linear, dim_radius, dim_diameter, dim_angular, dim_arc, dim_ordinate, dim_chain nối tiếp / baseline), `update_entities` (cả `dynamic_props`, `points` của polyline, `cells` của table, `draw_order`), `delete_entities`, `transform_entities` (move/copy/rotate/scale/mirror), `create_block`, `explode_entities` (attribute → text giữ giá trị) |
-| Sửa hàng loạt | `replace_text` (TEXT, MTEXT, attribute, dim, mleader, ô table; regex; `dry_run`), `edit_geometry` (offset, join, boundary), `sync_block_attributes` (như ATTSYNC) |
+| Vẽ / sửa | `add_entities` (line, polyline, rectangle, circle, arc, ellipse, point, text, mtext, attdef, insert + attribute, hatch, spline, table, mleader, dim_aligned, dim_linear, dim_radius, dim_diameter, dim_angular, dim_arc, dim_ordinate, dim_chain nối tiếp / baseline; text / mtext có `field`: tên file, ngày, diện tích / chiều dài đối tượng), `update_entities` (cả `dynamic_props`, `points` của polyline, `cells` của table, `draw_order`), `delete_entities`, `transform_entities` (move/copy/rotate/scale/mirror/align, array lưới `array_rect`, array tròn `array_polar`), `create_block`, `explode_entities` (attribute → text giữ giá trị) |
+| Sửa hàng loạt | `replace_text` (TEXT, MTEXT, attribute, dim, mleader, ô table; regex; `dry_run`), `edit_geometry` (offset, join, boundary, extend, trim, break, fillet, chamfer), `sync_block_attributes` (như ATTSYNC), `update_fields` (như UPDATEFIELD) |
+| Sửa trong block | `add_entities` / `query_entities` / `get_texts` với `space: "block:TÊN"`, rồi `update_entities` / `delete_entities` theo handle: sửa định nghĩa block không cần BEDIT (mọi insert đổi theo) |
 | Xem | `zoom`, `screenshot` (ảnh PNG cho Claude xem) |
 | Lệnh | `run_command` (gửi dòng lệnh AutoCAD, chờ xong, báo đối tượng mới tạo, tự Esc nếu lệnh còn treo), `cancel_command`, `reload_addin` |
 | Bridge | `list_autocad_instances`, `switch_autocad_instance` |
@@ -85,6 +90,9 @@ Tạo / đổi tên / xoá theo loại đối tượng:
 | Text / dim style | `set_text_style`, `set_dim_style`, `import_from_drawing` | `new_name` / `rename_object` | `delete_object` / `purge` |
 | Linetype | `load_linetype`, `import_from_drawing` | `rename_object` | `delete_object` / `purge` |
 | View | `save_view` | `rename_object` | `delete_object` |
+| UCS | `set_ucs save` | `rename_object` | `delete_object` |
+| Page setup | `set_page_setup` | `rename_object` | `delete_object` |
+| Layer state | `layer_state save` / `import` | `layer_state rename` | `layer_state delete` |
 | Group | `set_group` | `rename_object` | `delete_object` (ungroup) |
 | Xref | `attach_xref` | — (không đổi tên xref: layer/style của nó giữ tên cũ) | `manage_xref detach` |
 | Entity | `add_entities` | — | `delete_entities` |
@@ -98,6 +106,8 @@ Xuất file:
 | DXF | `save_document path=...dxf version=2018` |
 | DWG bản cũ / bản sao | `save_document version=2013`, `copy=true` |
 | PNG khung nhìn hiện tại | `screenshot save_path=...png` |
+| DWG mới từ entity / block (WBLOCK) | `export_entities` |
+| Layer state .las | `layer_state action=export` |
 | CSV cho Excel (UTF-8, giữ tiếng Việt) | `quantity_takeoff csv_path=...`, `extract_block_data csv_path=...` (`delimiter=";"` nếu Excel dùng dấu phẩy thập phân) |
 
 ## Ví dụ yêu cầu cho Claude
@@ -120,6 +130,27 @@ Xuất file:
 | "Lấy khung tên mới từ file mẫu, cập nhật mọi bản" | `import_from_drawing kind=block replace=true` → `sync_block_attributes` |
 | "Khoá viewport, freeze layer nội thất trong viewport đó" | `set_viewport locked=true freeze_layers=["I-*"]` |
 | "Đo khoảng cách giữa 2 trục, diện tích phòng này" | `measure mode=distance` / `measure mode=area handles=[...]` |
+| "Bo góc R500 cho 2 tường này, cắt phần thừa của đường này" | `edit_geometry operation=fillet radius=500` / `operation=trim` |
+| "Rải 5 × 8 cột, bước 6000" | `transform_entities operation=array_rect rows=5 columns=8 ...` |
+| "Ghi diện tích phòng tự cập nhật" | `add_entities type=text field={type: area, handle: ..., factor: 0.000001}` → `update_fields` |
+| "Sửa khung tên trong block TITLE, thêm logo" | `add_entities space="block:TITLE"` |
+| "Lưu trạng thái layer hiện tại, tắt layer nội thất" | `layer_state action=save` → `set_layer` |
+| "Tạo page setup A1 1:100 cho mọi layout" | `set_page_setup paper=A1 scale=1:100 apply_to=["*"]` |
+| "Chèn file scan .rcp, đặt UCS theo tường" | `attach_point_cloud` → `set_ucs action=set` |
+| "Cao độ surface EG tại các điểm này" (Civil 3D) | `civil_query elevation_at={surface: EG, points: [...]}` |
+
+## Agent Cursors — xem AI đang làm gì
+
+Giống Agent Cursors của T3Lab Revit: một bảng hoạt động cho biết AI app nào đang làm việc trong AutoCAD, nó định làm gì và đang ở bước nào. Mặc định **tắt**. Bật / tắt bằng lệnh `T3CURSORS` hoặc nút **Agent Cursors** trên ribbon (T3Lab › MCP Server). Khi AI gọi tool lần đầu mà bảng đang tắt, dòng lệnh nhắc gõ `T3CURSORS`.
+
+- **Bảng hoạt động** (palette, dock trái / phải): mỗi AI app 1 dòng (tên lấy từ MCP `clientInfo`: Claude, Claude Code, Cursor, ChatGPT...), trạng thái "Working 12 s", mục tiêu, kế hoạch ✓ / ▶ / ○, bước đang chạy theo màu (đọc, tạo, sửa, xoá, file, xem, lệnh) và 20 bước gần nhất (thời gian, số đối tượng tạo / sửa / xoá, lỗi).
+- **Nút:** *Pause* (AI chỉ được đọc / xem; tool sửa bản vẽ hoặc ghi file bị từ chối kèm lời nhắn cho AI, kể cả lệnh đang chờ), *Select touched* (chọn đối tượng AI vừa đụng tới), *Zoom*, *Replay* (chiếu lại các bước trên bản vẽ), *Clear*.
+- **Show on the drawing:** con trỏ của từng AI lướt tới chỗ đang làm, khung xanh = tạo mới, khung màu AI = sửa, dấu × đỏ = xoá (kèm loại + layer). Chỉ là hình tạm (transient), không vào bản vẽ, không vào Undo, không in.
+- **Zoom to the work:** tự zoom tới vùng AI vừa làm.
+- AI có thể gọi `t3lab_narrate` (goal, tasks, step, done) để bảng hiện kế hoạch; không gọi thì bảng vẫn hiện từng tool.
+- Lựa chọn lưu ở `%APPDATA%\T3LabCAD\agent_cursors.json`. Nút X chỉ đóng bảng: `T3CURSORS` mở lại, gõ khi bảng đang mở thì tắt hẳn. Bước đọc / xem chỉ di chuyển con trỏ (không khung, không zoom). "Select touched" chỉ chọn đối tượng AI đã sửa trong bản vẽ và space đang mở. Mọi lỗi của phần hiển thị chỉ ghi log, không làm hỏng lời gọi tool.
+
+Ý tưởng con trỏ nhiều agent tham khảo từ [swarm-cursors](https://github.com/thanhtranarch/swarm-cursors) (chỉ lấy ý tưởng, không dùng mã).
 
 ## An toàn
 
@@ -130,6 +161,9 @@ Xuất file:
 - `delete_drawing_file` chỉ xoá file AutoCAD (.dwg, .dxf, .dwt, .dws, .bak, .sv$) không đang mở, mặc định vào Recycle Bin; ổ mạng / USB phải `permanent=true`.
 - `delete_object` / `purge` không xoá đối tượng còn đang dùng, layer 0, style Standard, đối tượng current, Model hay layout giấy cuối cùng; `purge dry_run=true` chỉ báo cáo. Xoá nhiều tên cùng lúc: mỗi tên thành công / thất bại riêng.
 - Không đổi tên / xoá layer, style của xref (tên dạng `XREF|NAME`); xref thì dùng `manage_xref`.
+- `export_entities` không ghi đè file có sẵn trừ khi `overwrite=true`, không ghi vào bản vẽ đang mở.
+- `space: "block:TÊN"` không sửa xref, layout hay block ẩn danh (dynamic block / dim); sửa block thì mọi insert của nó đổi theo.
+- Array tối đa 5 000 bản sao / lần.
 - `replace_text` bỏ qua đối tượng trên layer bị khoá (có đếm); MTEXT có định dạng cắt ngang chữ cần tìm thì chỉ báo, không sửa. `dry_run=true` để xem trước.
 - `sync_block_attributes` giữ giá trị attribute; vị trí / kiểu chữ theo định nghĩa block, trừ khi `keep_positions=true`. Attribute không còn trong định nghĩa bị xoá (`remove_extra=false` để giữ).
 - `import_from_drawing replace=true` định nghĩa lại block / layer / style đã có (đánh dấu destructive), mọi insert của block bị thay đổi theo.
@@ -157,9 +191,16 @@ Mã nguồn tool (`src/T3LabCAD.Core/Tools/`):
 | `EditTools.cs` | vẽ, sửa, xoá, transform, block, explode |
 | `Annotation.cs` | các kiểu `add_entities`: table, mleader, dim radius / diameter / angular / arc / ordinate / chain |
 | `ModifyTools.cs` | `replace_text`, `edit_geometry`, `sync_block_attributes` |
+| `GeometryOps.cs` | extend, trim, break, fillet, chamfer (cho `edit_geometry`) |
+| `FieldTools.cs` | field trong text / mtext, `update_fields` |
+| `SheetTools.cs` | `set_page_setup`, `layer_state` |
+| `ReferenceTools.cs` | `attach_underlay`, `export_entities` (WBLOCK), `set_ucs` |
+| `CivilTools.cs` | `attach_point_cloud`, `civil_query`, `civil_points` (Civil 3D qua reflection: không cần tham chiếu DLL Civil 3D, AutoCAD thường vẫn nạp được) |
 | `XrefTools.cs` | xref |
 | `ViewTools.cs` | zoom, screenshot, named view |
 | `CommandTools.cs` | `run_command`, `cancel_command`, `reload_addin` |
+
+Agent Cursors (`src/T3LabCAD.Core/`): `AgentCursors.cs` (theo dõi bước, tên AI, `t3lab_narrate`, cài đặt), `ActivityPalette.cs` (bảng hoạt động), `CursorOverlay.cs` (con trỏ + khung trên bản vẽ bằng TransientManager). Hook trong `Rpc.CallTool`.
 
 Dùng chung (`src/T3LabCAD.Core/`): `Acad.cs` (space, layer, màu...), `Describe.cs` (entity → JSON), `Metrics.cs` (length / area), `Csv.cs` (CSV UTF-8 cho Excel).
 
@@ -195,7 +236,7 @@ python -I tests/smoke_live.py
 ```
 
 - `smoke_bridge.py` chạy không cần AutoCAD (dùng `tests/mock_autocad.py`); kiểm tra cả danh sách tool offline khớp snapshot.
-- `smoke_live.py` cần AutoCAD đang chạy (Windows). Chỉ **đọc** trên bản vẽ bạn đang mở. Mọi thao tác ghi làm trên một bản vẽ mới: tạo / đổi tên / xoá layout, style, linetype, block, group, view; explode; purge; đo (diện tích hình chữ nhật 1000 × 500 = 500 000, offset 100 ra ngoài = 840 000), join, boundary, giao điểm; table, mleader, 5 kiểu dim + dim_chain; `replace_text` (tiếng Việt, mọi kiểu chữ hoa / thường); block có attribute + `sync_block_attributes`; `set_viewport`; và kiểm tra 1 lần gọi = 1 bước Undo (`_.U`). Import layer từ file khác và CSV cũng chạy trong thư mục tạm. Phần file (lưu, bản sao 2013, xref, đổi tên, xoá, export / publish PDF) làm trong thư mục tạm `%TEMP%\t3labcad_live_<pid>`, xoá khi xong. Cuối cùng đóng bản vẽ thử không lưu và kiểm tra `reload_addin`.
+- `smoke_live.py` cần AutoCAD đang chạy (Windows). Chỉ **đọc** trên bản vẽ bạn đang mở. Mọi thao tác ghi làm trên một bản vẽ mới: tạo / đổi tên / xoá layout, style, linetype, block, group, view; explode; purge; đo (diện tích hình chữ nhật 1000 × 500 = 500 000, offset 100 ra ngoài = 840 000), join, boundary, giao điểm; table, mleader, 5 kiểu dim + dim_chain; `replace_text` (tiếng Việt, mọi kiểu chữ hoa / thường); block có attribute + `sync_block_attributes`; `set_viewport`; và kiểm tra 1 lần gọi = 1 bước Undo (`_.U`). Import layer từ file khác và CSV cũng chạy trong thư mục tạm. Phần file (lưu, bản sao 2013, xref, đổi tên, xoá, export / publish PDF) làm trong thư mục tạm `%TEMP%\t3labcad_live_<pid>`, xoá khi xong. Bản 1.4: extend (500 → 1000), trim, break, fillet R200 (2 line 800 + cung 314.1593), chamfer 100 (141.4214), fillet mọi góc polyline (diện tích 491 415.9265), align, array lưới / tròn, giới hạn 5 000 bản sao, sửa trong `block:TÊN`, field diện tích, `t3lab_narrate`, layer state (save / export .las / rename / restore / import), page setup, UCS, WBLOCK, underlay ảnh PNG. Cuối cùng đóng bản vẽ thử không lưu và kiểm tra `reload_addin`.
 
 Log: `%APPDATA%\T3LabCAD\logs\t3labcad.log`.
 
@@ -207,6 +248,7 @@ Log: `%APPDATA%\T3LabCAD\logs\t3labcad.log`.
 
 | Version | Nội dung |
 |---|---|
+| 1.4.0 | 55 → 65 tool. `edit_geometry` thêm extend, trim, break, fillet, chamfer. `space: "block:TÊN"` sửa định nghĩa block. `transform_entities` thêm align, array_rect, array_polar. Field trong text / mtext + `update_fields`. `set_page_setup`, `layer_state`, `attach_underlay`, `export_entities` (WBLOCK), `set_ucs`, `attach_point_cloud`, `civil_query`, `civil_points` (Civil 3D). **Agent Cursors**: bảng hoạt động + con trỏ AI trên bản vẽ (`T3CURSORS`), `t3lab_narrate`. |
 | 1.3.0 | 47 → 55 tool. `measure`, `quantity_takeoff`, `extract_block_data` (CSV), `replace_text`, `edit_geometry` (offset, join, boundary), `sync_block_attributes`, `import_from_drawing`, `set_viewport`. `add_entities` thêm table, mleader, attdef, dim radius / diameter / angular / arc / ordinate / chain. `update_entities` thêm dynamic block property, đỉnh polyline, ô table, draw order. `query_entities` thêm length / area, lọc màu / linetype / closed, `totals`. |
 | 1.2.0 | 27 → 47 tool. File (`list_drawing_files`, `rename_document`, `delete_drawing_file`; `save_document` bản sao / bản cũ; `new_document save_as`), layout + viewport, text / dim style, linetype, `list_named_objects` / `rename_object` / `delete_object` / `purge`, group, named view, xref, `explode_entities`, `export_pdf`, `publish_pdf`. `scripts/gen_tools_snapshot.py` + kiểm tra trong CI. |
 | 1.1.2 | Icon ribbon T3Lab không bị cắt; nút play / stop đặc. |
@@ -216,10 +258,18 @@ Log: `%APPDATA%\T3LabCAD\logs\t3labcad.log`.
 
 ## Dự kiến (chưa làm)
 
-Đợt 1 (10 bước) đã xong trong 1.3.0. Tiếp theo:
+Đợt 2–7 đã xong trong 1.4.0. Tiếp theo (theo thứ tự):
 
-1. `edit_geometry`: extend, trim, break, fillet / chamfer (line-line trước).
-2. `add_entities` / `query_entities` / `delete_entities` với `space: "block:TÊN"` để sửa định nghĩa block không cần BEDIT.
-3. `transform_entities`: array (lưới, tròn), align.
-4. Field trong text / mtext (tên file, ngày, diện tích đối tượng).
-5. `set_page_setup`, `layer_state`, `attach_underlay` (ảnh, PDF, DWF, DGN), `export_entities` (WBLOCK), `set_ucs`, point cloud cho Scan-to-BIM, và tool Civil 3D (alignment, surface, COGO point) trong một DLL riêng chỉ nạp khi chạy Civil 3D.
+1. Chuyển chữ TCVN3 / VNI sang Unicode (`convert_text_encoding`; `get_texts` tự giải mã).
+2. `audit_drawing` / `clean_drawing` (AUDIT, purge sâu, xoá đối tượng rỗng / trùng).
+3. `layer_standard`: kiểm tra / áp chuẩn layer từ CSV.
+4. `tag_areas` (ghi diện tích phòng), hatch theo điểm chọn, sửa hatch.
+5. `table_data`: CSV ↔ table.
+6. `title_blocks`: điền / đọc khung tên hàng loạt; `create_layout` từ file mẫu.
+7. Point cloud: crop / slice; `rectify_geometry` (nắn thẳng, vuông góc).
+8. `entity_data`: xdata / xrecord; lọc theo xdata trong `query_entities`.
+9. `coordinate_transform` (ma trận, Helmert), `survey_points`.
+10. `draw_grid` (lưới trục), dim_chain theo polyline, `text_tools`.
+11. `inspect_drawing_file` (đọc file đang đóng), publish cả thư mục, `export_pdf` ra PNG.
+12. `compare_drawings`, revision cloud.
+13. `solid_ops` (3D solid), đo khối lượng, view 3D.
