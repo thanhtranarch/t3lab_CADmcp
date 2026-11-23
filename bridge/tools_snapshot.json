@@ -457,6 +457,151 @@
    }
   },
   {
+   "name": "export_pdf",
+   "title": "Export to PDF",
+   "description": "Plot layouts of the active drawing to PDF (or DWFx / DWF): one multi-sheet file, or one file per layout. Uses each layout page setup; paper, plot_style, area, scale, center and rotation override it. Model space defaults to its extents, fit to the paper. list_options=true lists plotters, paper sizes and plot styles instead.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "layouts": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layouts to plot, * = every paper layout in tab order, Model = model space (default: the current layout)"
+     },
+     "path": {
+      "type": "string",
+      "description": "Output file (separate_files: output folder). Default: next to the drawing, named after it"
+     },
+     "separate_files": {
+      "type": "boolean",
+      "description": "One file per layout, named DRAWING-LAYOUT (default false: one multi-sheet file)"
+     },
+     "format": {
+      "type": "string",
+      "enum": [
+       "pdf",
+       "dwfx",
+       "dwf"
+      ],
+      "description": "Output format (default pdf)"
+     },
+     "plotter": {
+      "type": "string",
+      "description": "Plotter .pc3 (default: the page setup one if it makes this format, else DWG To PDF.pc3)"
+     },
+     "paper": {
+      "type": "string",
+      "description": "Paper size: canonical name or a part of it, e.g. A3, A1, ISO_full_bleed_A1 (default: page setup)"
+     },
+     "plot_style": {
+      "type": "string",
+      "description": "Plot style table, e.g. monochrome.ctb (default: page setup)"
+     },
+     "area": {
+      "type": "string",
+      "enum": [
+       "layout",
+       "extents",
+       "display",
+       "limits",
+       "window"
+      ],
+      "description": "What to plot (default: page setup; Model: extents)"
+     },
+     "window": {
+      "type": "array",
+      "items": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       }
+      },
+      "description": "area=window: [[x1, y1], [x2, y2]]"
+     },
+     "scale": {
+      "description": "fit, or paper:drawing units like 1:100 (default: page setup; fit when area changes)"
+     },
+     "center": {
+      "type": "boolean",
+      "description": "Center on the paper"
+     },
+     "rotation": {
+      "type": "string",
+      "enum": [
+       "0",
+       "90",
+       "180",
+       "270"
+      ],
+      "description": "Plot rotation in degrees"
+     },
+     "list_options": {
+      "type": "boolean",
+      "description": "Only list plotters, paper sizes (of plotter) and plot styles; plot nothing"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Export to PDF",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "publish_pdf",
+   "title": "Publish to PDF",
+   "description": "Publish layouts of one or more drawings (open, or files on disk) into one multi-sheet PDF (or DWFx / DWF), like PUBLISH. Each sheet uses its own page setup, or page_setup (a named page setup from page_setup_file) for all. Open drawings should be saved first: sheets may come from the file on disk.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "drawings": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Drawing paths or open drawing names (default: the active drawing)"
+     },
+     "layouts": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Layout names, wildcards allowed (default * = every paper layout, in tab order)"
+     },
+     "path": {
+      "type": "string",
+      "description": "Output file (default: next to the first drawing, named after it)"
+     },
+     "format": {
+      "type": "string",
+      "enum": [
+       "pdf",
+       "dwfx",
+       "dwf"
+      ],
+      "description": "Output format (default pdf)"
+     },
+     "page_setup": {
+      "type": "string",
+      "description": "Named page setup to use for every sheet"
+     },
+     "page_setup_file": {
+      "type": "string",
+      "description": "Drawing or template that holds page_setup (default: each drawing)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Publish to PDF",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "list_layers",
    "title": "List layers",
    "description": "Layers of the active drawing: color, linetype, lineweight, on/off, frozen, locked, plot, current. Xref layers (NAME|LAYER) are skipped unless include_xref=true.",

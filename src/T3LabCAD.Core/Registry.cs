@@ -65,6 +65,7 @@ namespace T3LabCAD.Core
             DocumentTools.Register();
             FileTools.Register();
             LayoutTools.Register();
+            ExportTools.Register();
             LayerTools.Register();
             StyleTools.Register();
             NamedObjectTools.Register();

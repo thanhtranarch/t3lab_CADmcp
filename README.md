@@ -39,7 +39,7 @@ Script sẽ:
 4. Thêm server `t3lab-autocad` vào `claude_desktop_config.json` (có backup). Thêm `-ClaudeCode` để đăng ký cho Claude Code CLI (`claude mcp add --scope user`).
 
 Sau đó **khởi động lại Claude Desktop**. Trong AutoCAD gõ `T3MCPSTATUS` để kiểm tra:
-`T3LabCAD MCP v1.2.0: listening on 127.0.0.1:48900 | 45 tools | ...`
+`T3LabCAD MCP v1.2.0: listening on 127.0.0.1:48900 | 47 tools | ...`
 
 Nếu AutoCAD đang mở lúc cài lần đầu: khởi động lại AutoCAD, hoặc `NETLOAD` file `T3LabCAD.Loader.dll` trong thư mục bundle.
 
@@ -51,6 +51,7 @@ Nếu AutoCAD đang mở lúc cài lần đầu: khởi động lại AutoCAD, h
 | Bản vẽ | `open_document` (tên không có thư mục = cạnh bản vẽ đang mở), `new_document` (`save_as`), `activate_document`, `save_document` (dwg / xuất dxf, `copy=true` lưu bản sao, `version` 2018/2013/2010/2007/2004/2000), `close_document` |
 | File | `list_drawing_files` (duyệt thư mục, đánh dấu file đang mở), `rename_document` (đổi tên file, bản vẽ đang mở được đóng → đổi tên → mở lại), `delete_drawing_file` (vào Recycle Bin, trừ khi `permanent=true`) |
 | Layout | `list_layouts`, `activate_layout`, `create_layout` (mới hoặc copy từ layout khác), `add_viewport` (vùng model + tỉ lệ 1:100) |
+| Export / publish | `export_pdf` (plot layout của bản vẽ đang mở ra PDF / DWFx / DWF: 1 file nhiều trang hoặc mỗi layout 1 file; đổi khổ giấy, ctb, vùng in, tỉ lệ; `list_options` liệt kê máy in, khổ giấy, ctb), `publish_pdf` (gộp layout của nhiều bản vẽ, kể cả file đang đóng, vào 1 PDF theo page setup). DXF: `save_document path=*.dxf`; ảnh PNG: `screenshot` |
 | Layer | `list_layers`, `set_layer` (tạo/sửa/đổi tên/on/freeze/lock/current), `delete_layer` (có `merge_into`) |
 | Style / linetype | `set_text_style` (font TrueType hoặc SHX, height, width factor, oblique), `set_dim_style` (tạo từ style gốc, đặt mọi biến DIM*, tự cập nhật dim), `load_linetype` (từ acadiso.lin, có wildcard) |
 | Đối tượng có tên | `list_named_objects`, `rename_object`, `delete_object`, `purge` — cho layer, block, layout, text_style, dim_style, linetype, view, ucs, group, mleader_style, table_style (xref chỉ list) |

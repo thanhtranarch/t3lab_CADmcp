@@ -350,6 +350,13 @@ def named_object_checks(c):
     check("purge one layer", ok(r) and d["purged"].get("layer") == ["T3-UNUSED"], d)
 
 
+def is_pdf(path):
+    if not os.path.exists(path):
+        return False
+    with open(path, "rb") as f:
+        return f.read(4) == b"%PDF"
+
+
 def dwg_version(path):
     with open(path, "rb") as f:
         return f.read(6).decode("ascii", "replace")
@@ -373,6 +380,26 @@ def file_checks(c, tmp):
     r, d = c.call("list_drawing_files", folder=tmp)
     names = {f["name"]: f for f in d.get("files", [])} if ok(r) else {}
     check("list_drawing_files", ok(r) and d["total"] == 3 and names.get("t3_main.dwg", {}).get("open"), d)
+
+    r, d = c.call("export_pdf", list_options=True)
+    check("export_pdf list_options", ok(r) and len(d["papers"]) > 10 and d["plot_styles"], d)
+    pdf = os.path.join(tmp, "t3_sheets.pdf")
+    r, d = c.call("export_pdf", layouts=["*"], path=pdf, paper="A3", plot_style="monochrome.ctb")
+    check("export_pdf multi-sheet A3", ok(r) and is_pdf(pdf) and len(d["files"][0]["sheets"]) >= 2 and
+          "A3" in d["files"][0]["sheets"][0]["paper"], d)
+    r, d = c.call("export_pdf", layouts=["Model"], path=os.path.join(tmp, "t3_model.pdf"))
+    check("export_pdf Model = extents, fit", ok(r) and d["files"][0]["sheets"][0]["area"] == "extents" and
+          d["files"][0]["sheets"][0]["scale"] == "fit", d)
+    sheets_dir = os.path.join(tmp, "sheets")
+    os.makedirs(sheets_dir, exist_ok=True)
+    r, d = c.call("export_pdf", layouts=["*"], separate_files=True, path=sheets_dir)
+    check("export_pdf one file per layout", ok(r) and len(d["files"]) >= 2 and all(is_pdf(f["path"]) for f in d["files"]), d)
+    r, d = c.call("export_pdf", layouts=["NO_SUCH_LAYOUT"], path=pdf)
+    check("export_pdf rejects unknown layout", r.get("isError"), d)
+    r, d = c.call("publish_pdf", path=os.path.join(tmp, "t3_publish.pdf"))
+    check("publish_pdf active drawing", ok(r) and is_pdf(os.path.join(tmp, "t3_publish.pdf")) and d["sheet_count"] >= 2, d)
+    r, d = c.call("publish_pdf", drawings=[main, old], layouts=["T3*"], path=os.path.join(tmp, "t3_publish_two.pdf"))
+    check("publish_pdf two drawings (one closed)", ok(r) and is_pdf(os.path.join(tmp, "t3_publish_two.pdf")) and d["sheet_count"] == 2, d)
 
     r, d = c.call("attach_xref", path=copy, relative_path=True, position=[5000, 0])
     check("attach_xref relative", ok(r) and d["status"] == "loaded" and d["path"].startswith(".\\"), d)

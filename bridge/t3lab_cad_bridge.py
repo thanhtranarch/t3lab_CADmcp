@@ -62,6 +62,7 @@ INSTRUCTIONS = (
     "undo step. Read with query_entities (detail=count first on big drawings), get_texts, list_layers, list_blocks; "
     "look with zoom + screenshot; draw with add_entities; edit with update_entities / transform_entities / explode_entities. "
     "Files: list_drawing_files, open_document, new_document, save_document, rename_document, delete_drawing_file. "
+    "Plot / export: export_pdf (layouts of the active drawing), publish_pdf (several drawings into one PDF). "
     "Named objects (layers, blocks, layouts, styles, linetypes, views, groups, xrefs): list_named_objects, rename_object, "
     "delete_object, purge; create them with set_layer, create_block, create_layout, set_text_style, set_dim_style, "
     "load_linetype, save_view, set_group, attach_xref. "
