@@ -159,18 +159,30 @@ namespace T3LabCAD.Core
                     vp.Locked = false;
                 }
 
+                // ViewCenter is in the viewport's display coordinates (target, direction and twist), the API takes WCS points
+                Matrix3d dcsToWcs = Matrix3d.Rotation(-vp.TwistAngle, vp.ViewDirection, vp.ViewTarget) *
+                                    Matrix3d.Displacement(vp.ViewTarget - Point3d.Origin) *
+                                    Matrix3d.PlaneToWorld(vp.ViewDirection);
+                Matrix3d wcsToDcs = dcsToWcs.Inverse();
                 if (a.Has("view_window"))
                 {
                     List<Point3d> w = a.Pts("view_window");
                     if (w.Count != 2) throw new ToolError("view_window must be [[x1, y1], [x2, y2]].");
-                    double ww = Math.Abs(w[1].X - w[0].X), wh = Math.Abs(w[1].Y - w[0].Y);
+                    var corners = new[]
+                    {
+                        new Point3d(w[0].X, w[0].Y, 0), new Point3d(w[1].X, w[0].Y, 0),
+                        new Point3d(w[1].X, w[1].Y, 0), new Point3d(w[0].X, w[1].Y, 0),
+                    }.Select(p => p.TransformBy(wcsToDcs)).ToList();
+                    double minX = corners.Min(p => p.X), maxX = corners.Max(p => p.X);
+                    double minY = corners.Min(p => p.Y), maxY = corners.Max(p => p.Y);
+                    double ww = maxX - minX, wh = maxY - minY;
                     if (ww < 1e-9 || wh < 1e-9) throw new ToolError("view_window must span a rectangle.");
-                    vp.ViewCenter = new Point2d((w[0].X + w[1].X) / 2, (w[0].Y + w[1].Y) / 2);
+                    vp.ViewCenter = new Point2d((minX + maxX) / 2, (minY + maxY) / 2);
                     if (!a.Has("scale")) vp.CustomScale = Math.Min(vp.Width / ww, vp.Height / wh);
                 }
                 if (a.Has("view_center"))
                 {
-                    Point3d vc = a.ReqPt("view_center");
+                    Point3d vc = a.ReqPt("view_center").TransformBy(wcsToDcs);
                     vp.ViewCenter = new Point2d(vc.X, vc.Y);
                 }
                 if (a.Has("scale")) vp.CustomScale = ParseScale(a.Raw("scale"));
@@ -192,7 +204,7 @@ namespace T3LabCAD.Core
                     ["layout"] = layoutName,
                     ["scale"] = Geo.R(vp.CustomScale),
                     ["scale_text"] = vp.CustomScale > 0 ? ScaleText(vp.CustomScale) : "?",
-                    ["view_center"] = Geo.P(vp.ViewCenter),
+                    ["view_center"] = Geo.P(new Point3d(vp.ViewCenter.X, vp.ViewCenter.Y, 0).TransformBy(dcsToWcs)),
                     ["locked"] = vp.Locked,
                     ["on"] = vp.On,
                     ["frozen_layers"] = frozen,

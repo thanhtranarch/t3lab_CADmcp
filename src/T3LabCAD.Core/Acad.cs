@@ -310,13 +310,14 @@ namespace T3LabCAD.Core
             {
                 case DBText t: return t.TextString;
                 case MText m: return m.Text;
-                case MLeader ml when ml.ContentType == ContentType.MTextContent: return ml.MText?.Text ?? "";
+                case MLeader ml when ml.ContentType == ContentType.MTextContent:
+                    using (MText copy = ml.MText) return copy?.Text ?? ""; // MLeader.MText is a new copy each time
                 case Dimension d: return d.DimensionText;
                 case BlockReference br:
                     var parts = new List<string> { EffectiveName(br, tr) };
                     foreach (ObjectId aid in br.AttributeCollection)
                     {
-                        if (tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar) parts.Add(ar.TextString);
+                        if (!aid.IsErased && tr.GetObject(aid, OpenMode.ForRead) is AttributeReference ar) parts.Add(ar.TextString);
                     }
                     return string.Join("\n", parts);
                 default: return "";
