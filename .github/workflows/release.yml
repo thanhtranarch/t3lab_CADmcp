@@ -27,6 +27,12 @@ jobs:
               dotnet build "src/$p/$p.csproj" -c Release -nologo -v q -p:AcadSeries=$s
             done
           done
+      - name: Fair call queue test (Conductor.cs, no host needed)
+        run: dotnet run --project tests/conductor_test -nologo
+      - name: Connect AI script test (register_mcp.py, fake home)
+        run: python3 -I tests/test_register.py
+      - name: Tool scopes (which tools may run in a document that is not the active one)
+        run: python3 -I scripts/check_tool_scopes.py
       - name: Tools snapshot matches the source
         run: python3 -I scripts/gen_tools_snapshot.py --check
       - name: Package

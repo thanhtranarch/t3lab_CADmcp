@@ -32,7 +32,7 @@ namespace T3LabCAD.Core
 
             Registry.Add("export_entities", "Write entities to a drawing (WBLOCK)", ToolKind.Write,
                 "WBLOCK: write entities (handles, all from one space) or a block definition (block) to a new .dwg, with the layers and " +
-                "styles they use. The active drawing does not change. version saves an older format.",
+                "styles they use. The drawing itself does not change. version saves an older format.",
                 ObjR("path",
                     P("path", Str("New .dwg path")),
                     Handles,
@@ -53,7 +53,7 @@ namespace T3LabCAD.Core
                     P("rotation", Num("set: rotate the X axis by this many degrees about Z (instead of x_axis)")),
                     P("name", Str("save / restore: named UCS")),
                     P("replace", Bool("save: overwrite a UCS with this name (default false)"))),
-                SetUcs);
+                SetUcs, scope: ToolScope.Active);
         }
 
         // ---------------------------------------------------------------- underlays
@@ -222,8 +222,8 @@ namespace T3LabCAD.Core
             var db = c.Db;
             string path = DocumentTools.ResolvePath(a.ReqStr("path"), ".dwg");
             if (!path.EndsWith(".dwg", StringComparison.OrdinalIgnoreCase)) throw new ToolError("path must be a .dwg.");
-            if (c.Doc.IsNamedDrawing && string.Equals(path, c.Doc.Name, StringComparison.OrdinalIgnoreCase))
-                throw new ToolError("The target is the active drawing itself.");
+            if (c.FilePath != null && string.Equals(path, c.FilePath, StringComparison.OrdinalIgnoreCase))
+                throw new ToolError("The target is the drawing itself.");
             if (DocumentTools.Find(path) != null) throw new ToolError($"{path} is open in AutoCAD: close it first.");
             if (File.Exists(path) && !a.Bool("overwrite", false)) throw new ToolError($"{path} already exists. Pass overwrite=true to replace it.");
             if (!Directory.Exists(Path.GetDirectoryName(path))) throw new ToolError($"Folder not found: {Path.GetDirectoryName(path)}");

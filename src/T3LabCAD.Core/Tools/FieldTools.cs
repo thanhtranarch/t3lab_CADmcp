@@ -25,7 +25,7 @@ namespace T3LabCAD.Core
         public static void Register()
         {
             Registry.Add("update_fields", "Update fields", ToolKind.Write,
-                "Re-evaluate the fields of the active drawing, like UPDATEFIELD on everything (object areas and lengths, dates, file name). " +
+                "Re-evaluate the fields of the drawing, like UPDATEFIELD on everything (object areas and lengths, dates, file name). " +
                 "Make fields with add_entities text / mtext field {...}.",
                 Obj(), UpdateFields);
         }

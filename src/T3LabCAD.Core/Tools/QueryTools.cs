@@ -49,7 +49,7 @@ namespace T3LabCAD.Core
                 GetTexts);
 
             Registry.Add("list_blocks", "List block definitions", ToolKind.Read,
-                "Block definitions of the active drawing with attribute definitions, entity count, insert count, dynamic/xref flags.",
+                "Block definitions of the drawing with attribute definitions, entity count, insert count, dynamic/xref flags.",
                 Obj(P("name", Str("Wildcard filter")),
                     P("include_anonymous", Bool("Include anonymous *U / *D blocks (default false)")),
                     P("include_xrefs", Bool("Include xrefs (default true)"))),
@@ -59,7 +59,7 @@ namespace T3LabCAD.Core
                 "get: the entities the user has selected (pickfirst). set / add: select these handles in AutoCAD (grips) so the user sees them. clear: deselect.",
                 ObjR("action", P("action", Enum("get, set, add or clear", "get", "set", "add", "clear")), Handles,
                     P("limit", Int("Max entities described for get (default 200)"))),
-                Selection);
+                Selection, scope: ToolScope.Active);
         }
 
         static object Query(ToolContext c, Args a)

@@ -31,7 +31,7 @@ namespace T3LabCAD.Core
         public ActivityPalette()
         {
             _view = new ActivityView();
-            _set = new PaletteSet("T3Lab Agent Cursors", PaletteId)
+            _set = new PaletteSet(T3Style.Title, PaletteId)
             {
                 Style = PaletteSetStyles.ShowCloseButton | PaletteSetStyles.ShowAutoHideButton | PaletteSetStyles.ShowPropertiesMenu,
                 MinimumSize = new Size(260, 280),
@@ -46,7 +46,7 @@ namespace T3LabCAD.Core
         {
             // Hide comes from the X, but also from HIDEPALETTES, clean screen, a workspace switch or no drawing open:
             // the bar just stays closed (T3CURSORS opens it again, or turns Agent Cursors off when it is open).
-            if (!_disposed && e.NewState == StateEventIndex.Show) _view.Invalidate(true);
+            if (!_disposed && e.NewState == StateEventIndex.Show) _view.Invalidate(true);   // also after a COLORTHEME switch
         }
 
         /// <summary>New content; reveal = open the bar if it is closed (refreshes never reopen a bar the user closed).</summary>
@@ -72,9 +72,15 @@ namespace T3LabCAD.Core
         }
     }
 
-    /// <summary>The content of the bar: drawn by hand (one owner-drawn canvas) plus a row of buttons.</summary>
+    /// <summary>
+    /// The content of the bar, laid out like T3Lab Revit MCP's bar (same order, words and T3Style colours; COLORTHEME picks
+    /// light or dark): per agent its pointer, name, status, counts, goal, plan with progress and the band of what runs now;
+    /// RECENT; then Show on drawing / Follow and Pause / Select changes / Replay / Clear. One owner-drawn canvas + controls.
+    /// </summary>
     internal sealed class ActivityView : UserControl
     {
+        const string Host = "AutoCAD", Place = "drawing";
+
         sealed class Canvas : Panel
         {
             public Canvas()
@@ -86,19 +92,23 @@ namespace T3LabCAD.Core
 
         readonly Canvas _canvas = new Canvas { Dock = DockStyle.Fill };
         readonly FlowLayoutPanel _buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(6, 4, 6, 6), WrapContents = true };
-        readonly Button _pause, _select, _zoom, _replay, _clear;
-        readonly CheckBox _onDrawing, _zoomToWork;
-        readonly Timer _tick = new Timer { Interval = 1000 };
+        readonly Button _pause, _select, _replay, _clear;
+        readonly CheckBox _onDrawing, _follow;
+        readonly ToolTip _tips = new ToolTip();
+        readonly Timer _tick = new Timer { Interval = 500 };
         AgentCursors.View _model = new AgentCursors.View();
         DateTime _modelAt = DateTime.Now;
         bool _updating;
+        T3Style.Palette _p = T3Style.Dark;
 
-        Color _back, _fore, _muted, _line, _panel;
-        readonly Font _font = new Font("Segoe UI", 9f), _bold = new Font("Segoe UI", 9f, FontStyle.Bold), _small = new Font("Segoe UI", 8f);
+        readonly Font _font = new Font("Segoe UI", 9f), _bold = new Font("Segoe UI", 9f, FontStyle.Bold), _small = new Font("Segoe UI", 8f),
+            _italic = new Font("Segoe UI", 8f, FontStyle.Italic);
         // GDI+ objects are cached per colour (a handful) and disposed with the control: no allocation per repaint
         readonly Dictionary<int, SolidBrush> _brushes = new Dictionary<int, SolidBrush>();
         readonly Dictionary<int, Pen> _pens = new Dictionary<int, Pen>();
         readonly StringFormat _oneLine = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+
+        static Color C(uint argb) => AgentCursors.C(argb);
 
         SolidBrush B(Color c)
         {
@@ -106,47 +116,48 @@ namespace T3LabCAD.Core
             return b;
         }
 
+        SolidBrush B(uint argb) => B(C(argb));
+
         Pen P(Color c)
         {
             if (!_pens.TryGetValue(c.ToArgb(), out Pen p)) _pens[c.ToArgb()] = p = new Pen(c, 1f);
             return p;
         }
 
-        public static Color ActionColor(ActionKind kind)
-        {
-            switch (kind)
-            {
-                case ActionKind.Create: return Color.FromArgb(0x14, 0xAE, 0x5C);
-                case ActionKind.Modify: return Color.FromArgb(0xFF, 0x8A, 0x00);
-                case ActionKind.Delete: return Color.FromArgb(0xF2, 0x48, 0x22);
-                case ActionKind.File: return Color.FromArgb(0xA2, 0x59, 0xFF);
-                case ActionKind.View: return Color.FromArgb(0x8C, 0x8C, 0x8C);
-                case ActionKind.Command: return Color.FromArgb(0xE0, 0xA8, 0x00);
-                default: return Color.FromArgb(0x0D, 0x99, 0xFF);
-            }
-        }
+        /// <summary>The action's colour (T3Style, the same in T3Lab Revit MCP).</summary>
+        public static Color ActionColor(ActionKind kind) => C(T3Style.Action(kind.ToString()));
 
         public ActivityView()
         {
             Font = _font;
-            _pause = MakeButton("⏸ Pause", (s, e) => AgentCursors.SetPaused(!_model.Paused));
-            _select = MakeButton("Select touched", (s, e) => AgentCursors.SelectTouched());
-            _zoom = MakeButton("Zoom", (s, e) => AgentCursors.ZoomTouched());
-            _replay = MakeButton("Replay", (s, e) => AgentCursors.Replay());
-            _clear = MakeButton("Clear", (s, e) => AgentCursors.ClearFeed());
-            _onDrawing = MakeCheck("Show on the drawing", "show_on_drawing");
-            _zoomToWork = MakeCheck("Zoom to the work", "zoom_to_work");
+            _onDrawing = MakeCheck(T3Style.ShowOn(Place), "show_on_drawing", T3Style.ShowOnTip(Place));
+            _follow = MakeCheck(T3Style.Follow, "zoom_to_work", T3Style.FollowTip(Host));
+            _buttons.SetFlowBreak(_follow, true);
+            _pause = MakeButton(T3Style.Pause, T3Style.PauseTip, (s, e) => AgentCursors.SetPaused(!_model.Paused));
+            _select = MakeButton(T3Style.Select, T3Style.SelectTip("entity"), (s, e) => AgentCursors.SelectTouched());
+            _replay = MakeButton(T3Style.Replay, T3Style.ReplayTip, (s, e) => AgentCursors.Replay());
+            _clear = MakeButton(T3Style.Clear, T3Style.ClearTip, (s, e) => AgentCursors.ClearFeed());
             Controls.Add(_canvas);
             Controls.Add(_buttons);
             _canvas.Paint += PaintCanvas;
-            _tick.Tick += (s, e) => { if (_model.Agents.Any(a => a.Working) || _model.Feed.Count > 0) _canvas.Invalidate(); };
+            _tick.Tick += (s, e) =>
+            {
+                try
+                {
+                    // the seconds count, "in line" -> "waiting for AutoCAD", thinking -> idle: a fresh snapshot (main thread)
+                    if (_model.Agents.Any(a => a.Working || a.State == AgentCursors.AgentState.Thinking)) SetView(AgentCursors.Snapshot());
+                    else if (_model.Feed.Count > 0 && DateTime.Now.Second % 5 == 0) _canvas.Invalidate();   // "3 min ago"
+                }
+                catch (Exception ex) { Log.Error("agent cursors bar tick: " + ex.Message); }
+            };
             _tick.Start();
             ApplyTheme();
         }
 
-        Button MakeButton(string text, EventHandler click)
+        Button MakeButton(string text, string tip, EventHandler click)
         {
             var b = new Button { Text = text, AutoSize = true, FlatStyle = FlatStyle.Flat, Margin = new Padding(2), Padding = new Padding(4, 1, 4, 1) };
+            _tips.SetToolTip(b, tip);
             b.Click += (s, e) =>
             {
                 try { click(s, e); }
@@ -156,9 +167,10 @@ namespace T3LabCAD.Core
             return b;
         }
 
-        CheckBox MakeCheck(string text, string option)
+        CheckBox MakeCheck(string text, string option, string tip)
         {
-            var c = new CheckBox { Text = text, AutoSize = true, Margin = new Padding(4, 4, 4, 2) };
+            var c = new CheckBox { Text = text, AutoSize = true, Margin = new Padding(4, 4, 8, 2) };
+            _tips.SetToolTip(c, tip);
             c.CheckedChanged += (s, e) => { if (!_updating) AgentCursors.SetOption(option, c.Checked); };
             _buttons.Controls.Add(c);
             return c;
@@ -172,18 +184,18 @@ namespace T3LabCAD.Core
 
         void ApplyTheme()
         {
-            bool dark = Dark();
-            _back = dark ? Color.FromArgb(0x2B, 0x30, 0x38) : Color.FromArgb(0xF7, 0xF7, 0xF7);
-            _panel = dark ? Color.FromArgb(0x34, 0x3A, 0x44) : Color.White;
-            _fore = dark ? Color.FromArgb(0xEE, 0xEE, 0xEE) : Color.FromArgb(0x1A, 0x1A, 0x1A);
-            _muted = dark ? Color.FromArgb(0xA0, 0xA6, 0xB0) : Color.FromArgb(0x6A, 0x6A, 0x6A);
-            _line = dark ? Color.FromArgb(0x45, 0x4C, 0x58) : Color.FromArgb(0xDD, 0xDD, 0xDD);
-            BackColor = _canvas.BackColor = _buttons.BackColor = _back;
+            _p = T3Style.For(Dark());
+            BackColor = _canvas.BackColor = _buttons.BackColor = C(_p.Bg);
             foreach (Control c in _buttons.Controls)
             {
-                c.ForeColor = _fore;
-                c.BackColor = c is Button ? _panel : _back;
-                if (c is Button b) b.FlatAppearance.BorderColor = _line;
+                c.ForeColor = C(_p.Text);
+                c.BackColor = c is Button ? C(_p.Card) : C(_p.Bg);
+                if (c is Button b) b.FlatAppearance.BorderColor = C(_p.Line);
+            }
+            if (_model.Paused)
+            {
+                _pause.BackColor = Color.FromArgb(0x33, C(_p.Warn));
+                _pause.FlatAppearance.BorderColor = C(_p.Warn);
             }
         }
 
@@ -194,12 +206,13 @@ namespace T3LabCAD.Core
             _updating = true;
             try
             {
-                _pause.Text = view.Paused ? "▶ Resume" : "⏸ Pause";
-                _pause.ForeColor = view.Paused ? Color.FromArgb(0xE0, 0x8E, 0x00) : _fore;
+                _pause.Text = view.Paused ? T3Style.Resume : T3Style.Pause;
                 _onDrawing.Checked = view.ShowOnDrawing;
-                _zoomToWork.Checked = view.ZoomToWork;
-                _zoomToWork.Enabled = view.ShowOnDrawing;
-                _select.Text = view.Touched > 0 ? $"Select touched ({view.Touched})" : "Select touched";
+                _follow.Checked = view.ZoomToWork;
+                _follow.Enabled = view.ShowOnDrawing;
+                _select.Text = T3Style.SelectLabel(view.Touched);
+                _select.Enabled = view.Touched > 0;
+                ApplyTheme();
             }
             finally { _updating = false; }
             _canvas.Invalidate();
@@ -211,15 +224,6 @@ namespace T3LabCAD.Core
             _tick.Dispose();
         }
 
-        static string Ago(DateTime when)
-        {
-            double s = (DateTime.Now - when).TotalSeconds;
-            if (s < 5) return "now";
-            if (s < 60) return $"{(int)s} s ago";
-            if (s < 3600) return $"{(int)(s / 60)} min ago";
-            return when.ToString("HH:mm");
-        }
-
         // ---------------------------------------------------------------- drawing
 
         void PaintCanvas(object sender, PaintEventArgs e)
@@ -227,104 +231,111 @@ namespace T3LabCAD.Core
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-            int w = _canvas.ClientSize.Width, x = 10, y = 8, inner = Math.Max(60, w - 20);
+            int w = _canvas.ClientSize.Width, x = 12, y = 10, inner = Math.Max(60, w - 24);
             double since = (DateTime.Now - _modelAt).TotalSeconds;
 
             if (_model.Agents.Count == 0)
             {
-                Line(g, "Waiting for an AI app…", _bold, _fore, x, ref y, inner);
-                Line(g, "When Claude, ChatGPT, Cursor or another AI app works in AutoCAD through T3Lab MCP, each step shows here.", _font, _muted, x, ref y, inner);
+                Line(g, T3Style.Empty, _bold, C(_p.Text), x, ref y, inner);
+                Line(g, T3Style.EmptyHint(Host), _font, C(_p.Muted), x, ref y, inner);
+                y += 6;
             }
 
-            foreach (AgentCursors.AgentView agent in _model.Agents.Take(3))
+            foreach (AgentCursors.AgentView agent in _model.Agents.Take(T3Style.AgentRows))
             {
-                // name row: pointer in the app's colour, name, status
+                // name row: the agent's pointer, name, status
                 Pointer(g, agent.Color, x, y + 1);
-                g.DrawString(agent.Name, _bold, B(_fore), x + 16, y);
-                string status = agent.Status == "Working" ? $"Working {(int)(agent.NowSeconds + since)} s" : agent.Status;
-                Color statusColor = agent.Status == "Paused" ? Color.FromArgb(0xE0, 0x8E, 0x00) : agent.Working ? ActivityView.ActionColor(agent.NowAction) : _muted;
-                SizeF ss = g.MeasureString(status, _small);
-                float sx = x + inner - ss.Width;
-                if (agent.Working)
+                g.DrawString(agent.Name, _bold, B(_p.Text), x + 16, y);
+                int secs = (int)(agent.NowSeconds + since);
+                string status;
+                uint statusColor;
+                switch (agent.State)
                 {
-                    int pulse = 3 + (int)((DateTime.Now.Millisecond / 250) % 2);
-                    g.FillEllipse(B(statusColor), sx - 10, y + 5, pulse * 2, pulse * 2);
+                    case AgentCursors.AgentState.Working: status = $"Working {secs} s"; statusColor = T3Style.Action(agent.NowAction.ToString()); break;
+                    case AgentCursors.AgentState.Blocked: status = $"Waiting for {Host} {secs} s"; statusColor = _p.Warn; break;
+                    case AgentCursors.AgentState.Queued:
+                    case AgentCursors.AgentState.Paused: status = agent.Status; statusColor = _p.Warn; break;
+                    case AgentCursors.AgentState.Thinking: status = "Thinking" + T3Style.Dots(); statusColor = _p.Info; break;
+                    default: status = agent.LastEnd.HasValue ? "Idle · last step " + T3Style.Ago(agent.LastEnd.Value) : "Idle"; statusColor = _p.Muted; break;
                 }
-                g.DrawString(status, _small, B(statusColor), sx, y + 1);
-                y += 20;
+                SizeF ss = g.MeasureString(status, _small);
+                g.DrawString(status, _small, B(statusColor), x + inner - ss.Width, y + 1);
+                y += 18;
+                g.DrawString(T3Style.Counts(agent.Calls, agent.Changes), _small, B(_p.Muted), x + 16, y);
+                y += 16;
 
-                if (!string.IsNullOrEmpty(agent.Goal)) Line(g, agent.Goal, _font, _fore, x, ref y, inner);
+                if (!string.IsNullOrEmpty(agent.Goal)) Line(g, agent.Goal, _font, C(_p.Text), x + 16, ref y, inner - 16);
                 if (agent.Tasks.Count > 0)
                 {
                     int done = agent.PlanDone ? agent.Tasks.Count : Math.Max(0, agent.Step - 1);
-                    string label = agent.PlanDone ? "Done" : $"Step {Math.Max(1, agent.Step)}/{agent.Tasks.Count}";
-                    g.DrawString(label, _small, B(_muted), x, y);
-                    int barX = x + 70, barW = Math.Max(20, inner - 70);
-                    g.FillRectangle(B(_line), barX, y + 5, barW, 5);
+                    g.DrawString(T3Style.StepOf(agent.Step, agent.Tasks.Count, agent.PlanDone), _small, B(_p.Muted), x + 16, y);
+                    int barX = x + 80, barW = Math.Max(20, inner - 80);
+                    g.FillRectangle(B(_p.Track), barX, y + 5, barW, 5);
                     g.FillRectangle(B(agent.Color), barX, y + 5, (int)(barW * (double)done / agent.Tasks.Count), 5);
                     y += 18;
                     for (int i = 0; i < agent.Tasks.Count; i++)
                     {
                         bool isDone = agent.PlanDone || i < agent.Step - 1, now = !agent.PlanDone && i == agent.Step - 1;
-                        string mark = isDone ? "✓" : now ? "▶" : "○";
-                        Color c = isDone ? _muted : now ? _fore : _muted;
-                        g.DrawString(mark, _small, B(isDone ? Color.FromArgb(0x14, 0xAE, 0x5C) : now ? agent.Color : _muted), x + 2, y);
+                        g.DrawString(T3Style.TaskMark(isDone, now), _small, isDone ? B(_p.Ok) : now ? B(agent.Color) : B(_p.Muted), x + 16, y);
                         int ty = y;
-                        Line(g, $"{i + 1}  {agent.Tasks[i]}", now ? _bold : _small, c, x + 16, ref ty, inner - 16);
+                        Line(g, $"{i + 1}  {agent.Tasks[i]}", now ? _bold : _small, C(now ? _p.Text : _p.Muted), x + 30, ref ty, inner - 30);
                         y = ty;
                     }
                 }
                 if (agent.Working && agent.Now != null)
                 {
-                    // what runs now: a block in the action's colour
-                    Color ac = ActivityView.ActionColor(agent.NowAction);
-                    var block = new Rectangle(x, y + 2, inner, 34);
-                    g.FillRectangle(B(Color.FromArgb(40, ac)), block);
-                    g.FillRectangle(B(ac), x, y + 2, 4, 34);
-                    g.DrawString(agent.NowAction.ToString().ToUpperInvariant(), _small, B(ac), x + 10, y + 4);
-                    g.DrawString(agent.Now, _bold, B(_fore), new RectangleF(x + 10, y + 17, inner - 14, 16));
-                    y += 42;
+                    // the band: the action's colour while it runs; amber while it waits its turn or for AutoCAD
+                    bool waits = agent.State == AgentCursors.AgentState.Queued || agent.State == AgentCursors.AgentState.Blocked;
+                    Color ac = waits ? C(_p.Warn) : ActionColor(agent.NowAction);
+                    string head = agent.State == AgentCursors.AgentState.Queued
+                        ? "IN LINE · " + (agent.Behind != null ? "after " + agent.Behind : "waiting its turn") + (agent.Ahead > 0 ? $", {agent.Ahead} more ahead" : "")
+                        : agent.State == AgentCursors.AgentState.Blocked ? $"WAITING · {Host} is busy (a dialog or a long operation)"
+                        : agent.NowAction.ToString().ToUpperInvariant();
+                    y += 4;
+                    g.FillRectangle(B(Color.FromArgb(40, ac)), x, y, inner, 34);
+                    g.FillRectangle(B(ac), x, y, 4, 34);
+                    g.DrawString(head, _small, B(ac), new RectangleF(x + 10, y + 2, inner - 14, 14), _oneLine);
+                    g.DrawString(agent.Now, _bold, B(_p.Text), new RectangleF(x + 10, y + 16, inner - 14, 16), _oneLine);
+                    y += 38;
+                }
+                else if (agent.State == AgentCursors.AgentState.Thinking)
+                {
+                    y += 2;
+                    Line(g, T3Style.Thinking + " " + T3Style.Dots(), _italic, C(_p.Muted), x + 16, ref y, inner - 16);
                 }
                 y += 6;
-                g.DrawLine(P(_line), x, y, x + inner, y);
+                g.DrawLine(P(C(_p.Line)), x, y, x + inner, y);
                 y += 8;
             }
 
             if (_model.Paused)
             {
-                Line(g, "Paused: changes from AI apps are held (read-only tools still run). Resume to let them work.", _small,
-                    Color.FromArgb(0xE0, 0x8E, 0x00), x, ref y, inner);
+                Line(g, T3Style.PausedNote, _small, C(_p.Warn), x, ref y, inner);
                 y += 4;
             }
 
-            if (_model.Feed.Count > 0)
+            g.DrawString(T3Style.Recent, _small, B(_p.Muted), x, y);
+            y += 16;
+            if (_model.Feed.Count == 0) Line(g, "Nothing yet.", _font, C(_p.Muted), x, ref y, inner);
+            foreach (AgentCursors.StepView step in _model.Feed.Take(T3Style.FeedRows))
             {
-                g.DrawString("LAST STEPS", _small, B(_muted), x, y);
-                y += 16;
-                foreach (AgentCursors.StepView step in _model.Feed.Take(8))
+                if (y > _canvas.ClientSize.Height - 18) break;
+                string state = step.State.ToString();
+                g.FillRectangle(B(ActionColor(step.Action)), x, y + 2, 3, 13);
+                g.DrawString(T3Style.Mark(state), _small, B(T3Style.MarkColor(state, _p)), x + 6, y);
+                string right = step.Agent + " · " + T3Style.Ago(step.When);
+                SizeF rs = g.MeasureString(right, _small);
+                g.DrawString(right, _small, B(_p.Muted), x + inner - rs.Width, y);
+                g.DrawString(step.Caption, _font, B(_p.Text), new RectangleF(x + 20, y - 1, Math.Max(10, inner - rs.Width - 26), 16), _oneLine);
+                y += 17;
+                string detail = T3Style.Detail(state, step.Changed, step.Seconds, step.Error);
+                if (detail.Length > 0)
                 {
-                    if (y > _canvas.ClientSize.Height - 18) break;
-                    Color mc = step.State == StepState.Ok ? Color.FromArgb(0x14, 0xAE, 0x5C)
-                        : step.State == StepState.Refused ? Color.FromArgb(0xE0, 0x8E, 0x00) : Color.FromArgb(0xF2, 0x48, 0x22);
-                    string mark = step.State == StepState.Ok ? "✓" : step.State == StepState.Refused ? "⏸" : "✕";
-                    g.FillRectangle(B(ActivityView.ActionColor(step.Action)), x, y + 2, 3, 13);
-                    g.DrawString(mark, _small, B(mc), x + 6, y);
-                    string right = $"{step.Agent} · {Ago(step.When)}";
-                    SizeF rs = g.MeasureString(right, _small);
-                    g.DrawString(right, _small, B(_muted), x + inner - rs.Width, y);
-                    g.DrawString(step.Caption, _font, B(_fore), new RectangleF(x + 20, y - 1, Math.Max(10, inner - rs.Width - 26), 16),
-                        _oneLine);
-                    y += 17;
-                    string detail = step.State == StepState.Ok
-                        ? (step.Changed > 0 ? $"{step.Changed} changed · {step.Seconds:0.0} s" : $"{step.Seconds:0.0} s")
-                        : step.Error ?? "";
-                    if (detail.Length > 0)
-                    {
-                        g.DrawString(detail, _small, B(step.State == StepState.Ok ? _muted : mc),
-                            new RectangleF(x + 20, y - 2, inner - 20, 14), _oneLine);
-                        y += 14;
-                    }
+                    g.DrawString(detail, _small, B(step.State == StepState.Ok ? _p.Muted : T3Style.MarkColor(state, _p)),
+                        new RectangleF(x + 20, y - 2, inner - 20, 14), _oneLine);
+                    y += 14;
                 }
+                y += 2;
             }
         }
 
@@ -336,7 +347,7 @@ namespace T3LabCAD.Core
             y += (int)Math.Ceiling(size.Height) + 2;
         }
 
-        /// <summary>A small mouse pointer, the avatar of an AI app.</summary>
+        /// <summary>The agent's avatar on the bar: the pointer it moves over the drawing.</summary>
         void Pointer(Graphics g, Color color, int x, int y)
         {
             var pts = new[] { new PointF(x, y), new PointF(x, y + 13), new PointF(x + 3.6f, y + 9.6f), new PointF(x + 6.2f, y + 14.5f),
@@ -352,7 +363,9 @@ namespace T3LabCAD.Core
                 _font.Dispose();
                 _bold.Dispose();
                 _small.Dispose();
+                _italic.Dispose();
                 _oneLine.Dispose();
+                _tips.Dispose();
                 foreach (SolidBrush b in _brushes.Values) b.Dispose();
                 foreach (Pen p in _pens.Values) p.Dispose();
                 _brushes.Clear();

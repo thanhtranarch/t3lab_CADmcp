@@ -70,7 +70,7 @@ namespace T3LabCAD.Core
             var tr = c.Tr;
             string path = DocumentTools.ResolvePath(a.ReqStr("path"), ".dwg");
             if (!File.Exists(path)) throw new ToolError($"File not found: {path}");
-            if (c.Doc.IsNamedDrawing && string.Equals(path, c.Doc.Name, StringComparison.OrdinalIgnoreCase))
+            if (c.FilePath != null && string.Equals(path, c.FilePath, StringComparison.OrdinalIgnoreCase))
                 throw new ToolError("A drawing cannot reference itself.");
             string name = (a.Str("name") ?? Path.GetFileNameWithoutExtension(path)).Trim();
             Acad.ValidateName(name, "xref");
@@ -83,7 +83,7 @@ namespace T3LabCAD.Core
             string relative = null;
             if (a.Bool("relative_path", false))
             {
-                relative = c.Doc.IsNamedDrawing ? Relative(Path.GetDirectoryName(c.Doc.Name), path) : null;
+                relative = c.FilePath != null ? Relative(Path.GetDirectoryName(c.FilePath), path) : null;
                 if (relative == null) throw new ToolError("relative_path needs a saved host drawing on the same drive as the xref.");
             }
 

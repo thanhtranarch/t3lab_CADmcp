@@ -29,7 +29,7 @@ namespace T3LabCAD.Core
                     P("center", Bool("Center on the paper")),
                     P("rotation", Enum("Plot rotation in degrees", "0", "90", "180", "270")),
                     P("apply_to", Strs("Layouts that take these settings, * = every paper layout"))),
-                SetPageSetup);
+                SetPageSetup, scope: ToolScope.Active);
 
             Registry.Add("layer_state", "Layer states", ToolKind.Write,
                 "Layer states (LAYERSTATE): list, save the current layer settings under a name (replace=true overwrites), restore one, " +

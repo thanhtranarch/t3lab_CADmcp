@@ -12,10 +12,12 @@ namespace T3LabCAD.Core
     /// </summary>
     public static class Entry
     {
-        public const string Version = "1.4.0";
+        public const string Version = "1.5.0";
         public const int PortMin = 48900, PortMax = 48908;
 
         internal static MainThread Main { get; private set; }
+        /// <summary>The one AutoCAD slot, shared fairly by every AI app (Conductor.cs).</summary>
+        internal static readonly Conductor Queue = new Conductor();
         internal static string ContentsDir { get; private set; }
         internal static string AcadVersion { get; private set; } = "";
         internal static volatile string ActiveDocument = "";
@@ -57,6 +59,8 @@ namespace T3LabCAD.Core
             AcApp.DocumentManager.DocumentDestroyed -= OnDocumentDestroyed;
             try { AgentCursors.Shutdown(); }
             catch (Exception ex) { Log.Error("agent cursors: " + ex.Message); }
+            try { BackgroundDrawings.CloseAll(); }   // Stop runs on AutoCAD's thread (commands, reload, exit)
+            catch (Exception ex) { Log.Error("background drawings: " + ex.Message); }
             _server.Stop();
             _server = null;
             Main?.Dispose();
@@ -64,11 +68,26 @@ namespace T3LabCAD.Core
             Log.Info("stopped");
         }
 
+        public static bool Running => _server != null;
+
+        /// <summary>A pin that names the active drawing (socket thread: compares with the name the events keep).</summary>
+        internal static bool IsActiveName(string pin)
+        {
+            string active = ActiveDocument ?? "", want = (pin ?? "").Trim().Trim('"');
+            return active.Length > 0 && (string.Equals(active, want, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(System.IO.Path.GetFileName(active), want, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(System.IO.Path.GetFileNameWithoutExtension(active), want, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>Same lines as T3Lab Revit MCP's Status.</summary>
         public static string Status()
         {
-            if (_server == null) return $"T3LabCAD MCP v{Version}: stopped (T3MCPSTART to start)";
+            if (_server == null) return $"T3Lab CAD MCP v{Version}: stopped (Start / Stop on the Add-ins tab, or T3MCP, starts it).";
             string last = string.IsNullOrEmpty(LastCall) ? "none" : LastCall;
-            return $"T3LabCAD MCP v{Version}: listening on 127.0.0.1:{_server.Port} | {Registry.Count} tools | {CallCount} calls | last: {last}";
+            var q = Queue.Status();
+            string queue = (bool)q["busy"] ? $"busy ({q["tool"]}), {q["waiting"]} waiting" : "free";
+            return $"T3Lab CAD MCP v{Version}: listening on 127.0.0.1:{_server.Port}\n{Registry.Count} tools · {CallCount} calls · last: {last}\n" +
+                   $"Queue: {queue}\nAgent Cursors: {(AgentCursors.Enabled ? "on" : "off")}\nLog: {Log.FilePath}";
         }
 
         internal static int Port => _server?.Port ?? 0;
@@ -76,7 +95,7 @@ namespace T3LabCAD.Core
         /// <summary>T3CURSORS (Loader command / ribbon): turn Agent Cursors on or off. Main thread; returns the message to show.</summary>
         public static string ToggleAgentCursors()
         {
-            if (_server == null) return "T3LabCAD MCP is stopped (T3MCPSTART first).";
+            if (_server == null) return "T3Lab CAD MCP is stopped (press Start first).";
             return AgentCursors.Toggle();
         }
 

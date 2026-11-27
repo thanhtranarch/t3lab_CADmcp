@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using AcRx = Autodesk.AutoCAD.Runtime;
 using static T3LabCAD.Core.Sch;
@@ -575,8 +576,9 @@ namespace T3LabCAD.Core
         static object Boundary(ToolContext c, Args a, ObjectId layerId)
         {
             // TraceBoundary takes the seed in the current UCS; the API speaks WCS
-            Point3d seed = a.ReqPt("point").TransformBy(c.Ed.CurrentUserCoordinateSystem.Inverse());
-            DBObjectCollection loops = c.Ed.TraceBoundary(seed, a.Bool("islands", true));
+            Editor ed = c.RequireEditor("boundary (it traces what the editor shows)");
+            Point3d seed = a.ReqPt("point").TransformBy(ed.CurrentUserCoordinateSystem.Inverse());
+            DBObjectCollection loops = ed.TraceBoundary(seed, a.Bool("islands", true));
             var objects = loops.Cast<DBObject>().ToList();
             try
             {

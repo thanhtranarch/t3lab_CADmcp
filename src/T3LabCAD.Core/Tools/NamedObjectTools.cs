@@ -23,7 +23,7 @@ namespace T3LabCAD.Core
         public static void Register()
         {
             Registry.Add("list_named_objects", "List named objects", ToolKind.Read,
-                "Named objects of the active drawing by kind: text_style (font, height, width factor), dim_style (main DIM variables, " +
+                "Named objects of the drawing by kind: text_style (font, height, width factor), dim_style (main DIM variables, " +
                 "full=true for all), linetype, view, ucs, group (entity handles), mleader_style, table_style, xref (path and status: " +
                 "loaded, unloaded, not_found...), page_setup (plotter, paper, plot style, scale). layer, block and layout return the same as " +
                 "list_layers, list_blocks and list_layouts.",
@@ -42,7 +42,7 @@ namespace T3LabCAD.Core
                     P("kind", Enum("Kind of object", EditKinds)),
                     P("name", Str("Current name")),
                     P("new_name", Str("New name"))),
-                Rename);
+                Rename, scope: ToolScope.Active);
 
             Registry.Add("delete_object", "Delete named object", ToolKind.Write,
                 "Delete named objects of one kind; each name succeeds or fails on its own (results say why). Objects still in use are refused: " +
@@ -54,7 +54,7 @@ namespace T3LabCAD.Core
                     P("names", Strs("Exact names to delete (no wildcards)")),
                     P("merge_into", Str("layer: layer that receives the entities")),
                     P("erase_references", Bool("block: also erase every insert of the block (default false)"))),
-                Delete, destructive: true);
+                Delete, destructive: true, scope: ToolScope.Active);
 
             Registry.Add("purge", "Purge unused", ToolKind.Write,
                 "Remove unused named objects like PURGE: blocks, layers, linetypes, text / dimension / multileader / table styles and " +
@@ -420,7 +420,7 @@ namespace T3LabCAD.Core
                     // one nested transaction per name: a failure undoes only that name
                     using (var sub = c.Db.TransactionManager.StartTransaction())
                     {
-                        var sc = new ToolContext { Doc = c.Doc, Db = c.Db, Ed = c.Ed, Tr = sub };
+                        var sc = c.With(sub);
                         Dictionary<string, object> details = DeleteOne(sc, kind, name, a);
                         sub.Commit();
                         if (details != null)

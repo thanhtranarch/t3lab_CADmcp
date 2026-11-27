@@ -68,7 +68,9 @@ namespace T3LabCAD.Core
                     if (!_running) break;
                     continue;
                 }
-                ThreadPool.QueueUserWorkItem(_ => Serve(client));
+                // its own thread: calls now wait in line (Conductor) for up to queue_wait_s, and thread-pool threads waiting
+                // there would delay health probes and tools/list, slowly on .NET Framework 4.8
+                new Thread(() => Serve(client)) { IsBackground = true, Name = "T3LabCAD MCP connection" }.Start();
             }
         }
 

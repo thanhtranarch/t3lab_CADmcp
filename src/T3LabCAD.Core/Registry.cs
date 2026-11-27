@@ -17,16 +17,41 @@ namespace T3LabCAD.Core
         App,
     }
 
+    /// <summary>
+    /// Which drawings a tool can work in. Any: the active one, another open one, or one opened in the background (a database
+    /// with no window: open_document background=true), pinned with autocad_document. Open: open drawings only (it needs the
+    /// Document). Active: the active drawing only (the editor, views, system variables, layouts, the command line).
+    /// scripts/check_tool_scopes.py proves that no tool reaches more than it declares.
+    /// </summary>
+    internal enum ToolScope { Any, Open, Active }
+
     internal delegate object ToolHandler(ToolContext ctx, Args args);
 
     internal sealed class ToolContext
     {
+        /// <summary>Null for a background drawing (a database only).</summary>
         public Document Doc;
         public Database Db;
+        /// <summary>Null unless the call works in the active drawing.</summary>
         public Editor Ed;
         /// <summary>Open for Read/Write tools with Tx=true; committed when the handler returns, aborted if it throws.</summary>
         public Transaction Tr;
         public bool NeedsRegen;
+        /// <summary>The drawing's file (full path), or null when it was never saved.</summary>
+        public string FilePath;
+
+        /// <summary>The same drawing with another transaction (a sub-step that may fail on its own).</summary>
+        public ToolContext With(Transaction tr) => new ToolContext { Doc = Doc, Db = Db, Ed = Ed, Tr = tr, FilePath = FilePath };
+
+        /// <summary>The editor, for a branch of a tool that needs it; elsewhere a clear refusal, never a null.</summary>
+        public Editor RequireEditor(string what) =>
+            Ed ?? throw new NeedsActiveException($"{what} needs the active drawing: '{System.IO.Path.GetFileName(FilePath ?? "this drawing")}' is not active in AutoCAD.");
+    }
+
+    /// <summary>A pinned call reached something only the active drawing has; nothing was changed. Rpc answers needs_active_document.</summary>
+    internal sealed class NeedsActiveException : Exception
+    {
+        public NeedsActiveException(string message) : base(message) { }
     }
 
     internal sealed class ToolDef
@@ -44,6 +69,7 @@ namespace T3LabCAD.Core
         public bool DuringCommand;
         /// <summary>A Read tool that can also write a file (CSV export): not advertised as read-only.</summary>
         public bool WritesFiles;
+        public ToolScope Scope;
     }
 
     /// <summary>Tool result rendered as an MCP image block plus a JSON text block.</summary>
@@ -88,7 +114,7 @@ namespace T3LabCAD.Core
 
         public static void Add(string name, string title, ToolKind kind, string description, string schema, ToolHandler handler,
             bool needsDocument = true, bool tx = true, bool destructive = false, bool background = false, bool duringCommand = false,
-            bool writesFiles = false)
+            bool writesFiles = false, ToolScope scope = ToolScope.Any)
         {
             _tools[name] = new ToolDef
             {
@@ -104,7 +130,32 @@ namespace T3LabCAD.Core
                 Background = background,
                 DuringCommand = duringCommand,
                 WritesFiles = writesFiles,
+                Scope = scope,
             };
+        }
+
+        /// <summary>The argument that sends a call to another drawing (stripped before the tool runs, Rpc.Execute).</summary>
+        public const string DocumentPin = "autocad_document";
+
+        const string PinAny =
+            "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). " +
+            "Default: the active drawing. It does not switch the drawing the user sees";
+        const string PinOpen =
+            "Drawing to work in: name or path of a drawing open in AutoCAD (not a background one). Default: the active drawing. " +
+            "It does not switch the drawing the user sees";
+
+        /// <summary>Tools that can work in another drawing advertise the pin (scripts/gen_tools_snapshot.py adds the same).</summary>
+        public static bool TakesPin(ToolDef t) => t.NeedsDocument && t.Scope != ToolScope.Active;
+
+        /// <summary>A copy of the schema with the autocad_document property (the stored schema is shared, never changed).</summary>
+        static Dictionary<string, object> WithPin(ToolDef t)
+        {
+            var copy = new Dictionary<string, object>(t.Schema);
+            var props = t.Schema.TryGetValue("properties", out object p) && p is Dictionary<string, object> d
+                ? new Dictionary<string, object>(d) : new Dictionary<string, object>();
+            props[DocumentPin] = new Dictionary<string, object> { ["type"] = "string", ["description"] = t.Scope == ToolScope.Open ? PinOpen : PinAny };
+            copy["properties"] = props;
+            return copy;
         }
 
         public static ToolDef Get(string name) => _tools.TryGetValue(name, out var t) ? t : null;
@@ -116,7 +167,7 @@ namespace T3LabCAD.Core
                 ["name"] = t.Name,
                 ["title"] = t.Title,
                 ["description"] = t.Description,
-                ["inputSchema"] = t.Schema,
+                ["inputSchema"] = TakesPin(t) ? WithPin(t) : t.Schema,
                 ["annotations"] = new Dictionary<string, object>
                 {
                     ["title"] = t.Title,

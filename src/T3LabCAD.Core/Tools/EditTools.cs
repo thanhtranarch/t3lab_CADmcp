@@ -550,7 +550,7 @@ namespace T3LabCAD.Core
                     // one nested transaction per entity: a change that fails half way is undone for that entity only
                     using (var sub = c.Db.TransactionManager.StartTransaction())
                     {
-                        var sc = new ToolContext { Doc = c.Doc, Db = c.Db, Ed = c.Ed, Tr = sub };
+                        var sc = c.With(sub);
                         var e = (Entity)sub.GetObject(Acad.Id(c.Db, job.Key), OpenMode.ForWrite);
                         List<string> skipped = Apply(sc, e, job.Value);
                         sub.Commit();

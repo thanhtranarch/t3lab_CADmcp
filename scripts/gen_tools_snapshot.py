@@ -243,11 +243,17 @@ def tools():
             positional = [a for a in args if not isinstance(a, tuple)]
             named = dict(a for a in args if isinstance(a, tuple))
             name, title, kind, description, schema = positional[:5]
+            input_schema = json.loads(schema.replace("'", '"'))
+            # = Registry.TakesPin / WithPin: tools that can work in another drawing advertise the document pin
+            scope = named.get("scope", "ToolScope.Any")
+            if named.get("needsDocument", True) is not False and scope != "ToolScope.Active":
+                text = names["PinOpen"] if scope == "ToolScope.Open" else names["PinAny"]
+                input_schema.setdefault("properties", {})[names["DocumentPin"]] = {"type": "string", "description": text}
             result.append({
                 "name": name,
                 "title": title,
                 "description": description,
-                "inputSchema": json.loads(schema.replace("'", '"')),
+                "inputSchema": input_schema,
                 "annotations": {
                     "title": title,
                     "readOnlyHint": kind == "ToolKind.Read" and not named.get("writesFiles", False),

@@ -50,7 +50,7 @@ namespace T3LabCAD.Core
             if (!item.Done.Wait(startTimeoutMs))
             {
                 if (Interlocked.CompareExchange(ref item.State, Cancelled, Pending) == Pending)
-                    throw new ToolError($"AutoCAD did not respond within {startTimeoutMs / 1000}s (a modal dialog or a long operation is blocking it). Nothing was executed.");
+                    throw new NotStartedException($"AutoCAD did not respond within {startTimeoutMs / 1000}s (a modal dialog or a long operation is blocking it). Nothing was executed.");
                 item.Done.Wait(MaxRunMs); // it started: wait for it to finish
             }
             if (item.Error != null) ExceptionDispatchInfo.Capture(item.Error).Throw();
@@ -91,6 +91,12 @@ namespace T3LabCAD.Core
         public void Dispose()
         {
             try { _control.Dispose(); } catch { }
+        }
+
+        /// <summary>The work was cancelled before it started (AutoCAD was not free in time): nothing of it ran.</summary>
+        internal sealed class NotStartedException : Exception
+        {
+            public NotStartedException(string message) : base(message) { }
         }
 
         sealed class WorkItem<T>

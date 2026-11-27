@@ -11,7 +11,7 @@ namespace T3LabCAD.Core
         internal static string DataDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "T3LabCAD");
 
-        static string FilePath => Path.Combine(DataDir, "logs", "t3labcad.log");
+        internal static string FilePath => Path.Combine(DataDir, "logs", "t3labcad.log");
 
         public static void Info(string message) => Write("INFO", message);
 

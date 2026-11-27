@@ -15,7 +15,7 @@ namespace T3LabCAD.Core
     /// <summary>What kind of work a call does: picks the colour on the bar and on the drawing.</summary>
     internal enum ActionKind { Read, Create, Modify, Delete, File, View, Command }
 
-    internal enum StepState { Running, Ok, Failed, Refused }
+    internal enum StepState { Running, Ok, Failed, Refused, Busy }
 
     /// <summary>One tool call as the Agent Cursors bar shows it.</summary>
     internal sealed class AgentStep
@@ -32,6 +32,11 @@ namespace T3LabCAD.Core
         public int ErasedCount;
         public string Document = "";                                        // full name of the drawing it ran in
         public int Changed => Created.Count + Modified.Count + ErasedCount;
+        // the fair queue (Conductor): in line, then holding the slot, then running on AutoCAD's thread
+        public volatile bool Queued, OnMain;
+        public int Ahead;
+        public string Behind;
+        public DateTime Granted, RunStarted;
     }
 
     internal sealed class AgentInfo
@@ -44,6 +49,7 @@ namespace T3LabCAD.Core
         public bool PlanDone;
         public AgentStep Current;
         public DateTime LastSeen = DateTime.Now;
+        public DateTime? LastEnd;
         public int Calls, Changes;
     }
 
@@ -56,8 +62,10 @@ namespace T3LabCAD.Core
     /// </summary>
     internal static class AgentCursors
     {
-        public const string NarrateTool = "t3lab_narrate";
+        public const string NarrateTool = "t3lab_narrate", ControlTool = "agent_cursors";
         const int FeedSize = 20, PlanMax = 8, TaskMax = 60, GoalMax = 90, MaxCapture = 200, MaxTouched = 5000;
+        /// <summary>After a call, the agent is "thinking" (waiting for its model) this long, then idle.</summary>
+        internal const double ThinkS = 20, BlockedAfterS = 2;
 
         static readonly object Gate = new object();
         static readonly Dictionary<string, AgentInfo> Agents = new Dictionary<string, AgentInfo>(StringComparer.OrdinalIgnoreCase);
@@ -81,10 +89,11 @@ namespace T3LabCAD.Core
         {
             try
             {
+                ShowOnDrawing = true;   // on by default, as in T3Lab Revit MCP
                 if (!File.Exists(SettingsFile)) return;
                 var a = new Args(Json.Parse(File.ReadAllText(SettingsFile)));
                 Enabled = a.Bool("enabled", false);
-                ShowOnDrawing = a.Bool("show_on_drawing", false);
+                ShowOnDrawing = a.Bool("show_on_drawing", true);
                 ZoomToWork = a.Bool("zoom_to_work", false);
             }
             catch (Exception ex) { Log.Error("agent cursors settings: " + ex.Message); }
@@ -171,12 +180,10 @@ namespace T3LabCAD.Core
             if (Enabled && (_palette == null || !_palette.Alive || !_palette.Visible))
             {
                 ShowUi(true);
-                return "T3Lab Agent Cursors: bar shown. T3CURSORS again turns Agent Cursors off.";
+                return "T3Lab Agent Cursors: bar shown. Press Agent Cursors again to turn it off.";
             }
             SetEnabled(!Enabled);
-            return Enabled
-                ? "T3Lab Agent Cursors: on. The bar shows what each AI app does; tick \"Show on the drawing\" for cursors and boxes."
-                : "T3Lab Agent Cursors: off.";
+            return Enabled ? "T3Lab Agent Cursors: on. The bar shows what each AI app does." : "T3Lab Agent Cursors: off.";
         }
 
         public static void SetEnabled(bool on)
@@ -238,6 +245,7 @@ namespace T3LabCAD.Core
             lock (Gate)
             {
                 Agents.Clear();
+                Retired.Clear();
                 Feed.Clear();
                 Touched.Clear();
             }
@@ -245,42 +253,69 @@ namespace T3LabCAD.Core
 
         // ---------------------------------------------------------------- agents
 
-        static readonly System.Drawing.Color[] Palette =
-        {
-            System.Drawing.Color.FromArgb(0xD9, 0x77, 0x57), System.Drawing.Color.FromArgb(0x0D, 0x99, 0xFF),
-            System.Drawing.Color.FromArgb(0x14, 0xAE, 0x5C), System.Drawing.Color.FromArgb(0xA2, 0x59, 0xFF),
-            System.Drawing.Color.FromArgb(0xE8, 0x46, 0x7C), System.Drawing.Color.FromArgb(0x00, 0xB5, 0xCE),
-            System.Drawing.Color.FromArgb(0xFF, 0xC7, 0x00), System.Drawing.Color.FromArgb(0xFF, 0x72, 0x62),
-        };
+        /// <summary>A T3Style colour (ARGB) as a System.Drawing colour.</summary>
+        internal static System.Drawing.Color C(uint argb) => System.Drawing.Color.FromArgb(unchecked((int)argb));
 
-        /// <summary>Display name and colour of an AI app from its MCP clientInfo.name.</summary>
-        static AgentInfo AgentFor(string rawName)
+        /// <summary>Display name and colour of an AI app (T3Style.Agent, shared with T3Lab Revit MCP).</summary>
+        static string Known(string rawName, out uint color) => T3Style.Agent(rawName, out color);
+
+        /// <summary>
+        /// One agent per chat: the key is "name#session" (the bridge's process id). A second chat of the same app is
+        /// "Claude Code 2" in another colour, so two chats never share one pointer.
+        /// </summary>
+        static AgentInfo AgentFor(string clientKey)
         {
-            string key = string.IsNullOrWhiteSpace(rawName) ? "ai" : rawName.Trim();
+            string key = string.IsNullOrWhiteSpace(clientKey) ? "ai" : clientKey.Trim();
             if (Agents.TryGetValue(key, out AgentInfo known)) return known;
-            string lower = key.ToLowerInvariant();
-            string name;
-            System.Drawing.Color color;
-            if (lower.Contains("claude-code") || lower == "claude code") { name = "Claude Code"; color = Palette[0]; }
-            else if (lower.Contains("claude")) { name = "Claude"; color = Palette[0]; }
-            else if (lower.Contains("cursor")) { name = "Cursor"; color = Palette[3]; }
-            else if (lower.Contains("codex") || lower.Contains("openai") || lower.Contains("chatgpt")) { name = "ChatGPT"; color = Palette[2]; }
-            else if (lower.Contains("gemini") || lower.Contains("antigravity")) { name = "Gemini"; color = Palette[1]; }
-            else if (lower.Contains("copilot") || lower.Contains("vscode")) { name = "Copilot"; color = Palette[5]; }
-            else if (key == "ai") { name = "AI"; color = Palette[1]; }
+            string name = Known(BaseName(key), out uint color);
+            List<AgentInfo> same = Agents.Values.Where(a => Known(BaseName(a.Key), out uint unused) == name).ToList();
+            // a new chat inherits the name and colour of a chat of the same app that went quiet (bridges restart: names must
+            // not climb to "7"); it starts with an empty plan, and the quiet one is retired, never shared by two live chats
+            AgentInfo quiet = same.FirstOrDefault(a => a.Current == null && (DateTime.Now - a.LastSeen).TotalMinutes > QuietMinutes);
+            AgentInfo info;
+            if (quiet != null)
+            {
+                Agents.Remove(quiet.Key);
+                Retired[quiet.Key] = quiet;
+                info = new AgentInfo { Key = key, Name = quiet.Name, Color = quiet.Color };
+            }
             else
             {
-                name = key.Length > 16 ? key.Substring(0, 16) : key;
-                color = Palette[(key.GetHashCode() & 0x7FFFFFFF) % Palette.Length];
+                int n = 1;
+                string label = name;
+                while (same.Any(a => a.Name == label)) label = name + " " + ++n;
+                info = new AgentInfo { Key = key, Name = label, Color = C(n == 1 ? color : T3Style.Extra(name, n)) };
             }
-            var info = new AgentInfo { Key = key, Name = name, Color = color };
             Agents[key] = info;
             return info;
         }
 
-        public static string ClientName(object raw)
+        static IEnumerable<AgentInfo> AllAgents() => Agents.Values;
+
+        /// <summary>Agents a newer chat replaced: their steps in the feed keep their name and colour. A retired chat that comes back is a new agent.</summary>
+        static readonly Dictionary<string, AgentInfo> Retired = new Dictionary<string, AgentInfo>(StringComparer.OrdinalIgnoreCase);
+
+        const double QuietMinutes = 5;
+
+        static string BaseName(string key)
         {
-            if (raw is Dictionary<string, object> d) return new Args(d).Str("name");
+            int hash = key.LastIndexOf('#');
+            return hash > 0 ? key.Substring(0, hash) : key;
+        }
+
+        /// <summary>Who an agent is, for messages (no registration): "Claude Code".</summary>
+        public static string Label(string clientKey) => Known(BaseName(clientKey ?? "ai"), out uint unused);
+
+        /// <summary>"claude-code#4812" from the bridge's client {name, version, session}.</summary>
+        public static string ClientKey(object raw)
+        {
+            if (raw is Dictionary<string, object> d)
+            {
+                var a = new Args(d);
+                string name = a.Str("name");
+                string session = a.Str("session");
+                return string.IsNullOrEmpty(session) ? name : (name ?? "ai") + "#" + session;
+            }
             return raw as string;
         }
 
@@ -291,7 +326,7 @@ namespace T3LabCAD.Core
         {
             if (!Enabled)
             {
-                if (!_hinted && def.Name != NarrateTool)
+                if (!_hinted && def.Name != NarrateTool && def.Name != ControlTool)
                 {
                     _hinted = true;
                     string who = AgentForName(client);
@@ -299,7 +334,7 @@ namespace T3LabCAD.Core
                 }
                 return null;
             }
-            if (def.Name == NarrateTool) return null;
+            if (def.Name == NarrateTool || def.Name == ControlTool) return null;
             var step = new AgentStep
             {
                 Tool = def.Name,
@@ -309,17 +344,71 @@ namespace T3LabCAD.Core
             };
             AddCapped(step.NamedHandles, HandlesIn(args.Raw("handles")));
             AddCapped(step.NamedHandles, HandlesIn(args.Raw("handle")));
+            AgentInfo agent;
             lock (Gate)
             {
-                AgentInfo agent = AgentFor(client);
+                agent = AgentFor(client);
                 step.Agent = agent.Key;
                 agent.Current = step;
                 agent.LastSeen = DateTime.Now;
                 agent.Calls++;
             }
             Refresh();
+            if (ShowOnDrawing) PointerState(agent.Name, CursorOverlay.Mode.Working, step.Caption + "…");
             return step;
         }
+
+        /// <summary>The call has to wait for its turn (Conductor, socket thread).</summary>
+        public static void Queued(AgentStep step, int ahead, string runningClient)
+        {
+            if (step == null) return;
+            step.Ahead = ahead;
+            step.Behind = runningClient == null ? null : NameOf(runningClient);
+            step.Queued = true;
+            Refresh();
+        }
+
+        /// <summary>The call holds AutoCAD's slot; AutoCAD may still be blocked by a modal dialog until OnMain.</summary>
+        public static void Granted(AgentStep step)
+        {
+            if (step == null) return;
+            step.Granted = DateTime.Now;
+            bool was = step.Queued;
+            step.Queued = false;
+            if (was) Refresh();
+        }
+
+        /// <summary>The drawing a call works in (main thread, once resolved); another than the active one shows on its caption.</summary>
+        public static void SetDocument(AgentStep step, string name, bool active)
+        {
+            if (step == null || string.IsNullOrEmpty(name)) return;
+            step.Document = name;
+            if (!active)
+            {
+                step.Caption += " · in " + System.IO.Path.GetFileName(name);
+                Refresh();
+            }
+        }
+
+        public static void OnMain(AgentStep step)
+        {
+            if (step == null) return;
+            step.RunStarted = DateTime.Now;
+            step.OnMain = true;
+        }
+
+        static string NameOf(string clientKey)
+        {
+            lock (Gate) return Agents.TryGetValue(clientKey, out AgentInfo a) ? a.Name : Label(clientKey);
+        }
+
+        /// <summary>Retag an agent's pointer that is on the drawing (any thread; never creates one).</summary>
+        static void PointerState(string agent, CursorOverlay.Mode mode, string text) =>
+            Entry.Main?.Post(() =>
+            {
+                try { _overlay?.SetState(agent, mode, text); }
+                catch (Exception ex) { Log.Error("agent cursors tag: " + ex.Message); }
+            });
 
         static string AgentForName(string client)
         {
@@ -349,7 +438,7 @@ namespace T3LabCAD.Core
                 if (loader != null) has = loader.GetType("T3LabCAD.Loader.Commands")?.GetMethod("Cursors") != null;
             }
             catch (Exception) { /* assume a current Loader */ }
-            return _howToOpen = has ? "Type T3CURSORS" : "Restart AutoCAD (new T3Lab ribbon), then type T3CURSORS";
+            return _howToOpen = has ? "Type T3CURSORS" : "Restart AutoCAD (new T3Lab MCP ribbon panel), then type T3CURSORS";
         }
 
         public const string PausedMessage =
@@ -364,7 +453,7 @@ namespace T3LabCAD.Core
         {
             try
             {
-                if (!Enabled || !Paused || def.Name == NarrateTool || def.Name == "cancel_command") return false;
+                if (!Enabled || !Paused || def.Name == NarrateTool || def.Name == ControlTool || def.Name == "cancel_command") return false;
                 ActionKind k = ActionOf(def, args);
                 if (k == ActionKind.Read || k == ActionKind.View) return WritesFileNow(args);
                 if (def.Kind == ToolKind.Read) return def.WritesFiles; // list_drawing_files reads; export_entities writes
@@ -380,11 +469,12 @@ namespace T3LabCAD.Core
         public static bool Captures(ToolDef def) => def.Kind == ToolKind.Write || def.Name == "run_command";
 
         /// <summary>A call ended (socket thread): record it, then show it.</summary>
-        public static void End(AgentStep step, bool ok, bool refused, string error, object result)
+        public static void End(AgentStep step, bool ok, bool refused, bool busy, string error, object result)
         {
             if (step == null) return;
             step.Seconds = (DateTime.Now - step.Started).TotalSeconds;
-            step.State = refused ? StepState.Refused : ok ? StepState.Ok : StepState.Failed;
+            step.State = busy ? StepState.Busy : refused ? StepState.Refused : ok ? StepState.Ok : StepState.Failed;
+            step.Queued = false;
             step.Error = error;
             if (result != null && ok) CollectResultHandles(result, step.NamedHandles, 0);
             AgentInfo agent;
@@ -395,6 +485,7 @@ namespace T3LabCAD.Core
                 {
                     if (agent.Current == step) agent.Current = null;
                     agent.LastSeen = DateTime.Now;
+                    agent.LastEnd = DateTime.Now;
                     agent.Changes += step.Changed;
                 }
                 Feed.Insert(0, step);
@@ -412,13 +503,17 @@ namespace T3LabCAD.Core
             Entry.Main?.Post(() =>
             {
                 RefreshNow();
-                if (ShowOnDrawing && step.State == StepState.Ok && agent != null) ShowOnModel(agent, step);
+                if (!ShowOnDrawing || agent == null) return;
+                if (step.State == StepState.Ok) ShowOnModel(agent, step);
+                else _overlay?.SetState(agent.Name, CursorOverlay.Mode.Done,
+                    step.State == StepState.Busy ? "waiting for AutoCAD" : step.State == StepState.Refused ? "paused" : "failed");
             });
         }
 
         /// <summary>The goal / task banner (t3lab_narrate). Any thread.</summary>
         public static void Narrate(string client, string goal, List<string> tasks, int step, bool done)
         {
+            string name;
             lock (Gate)
             {
                 AgentInfo agent = AgentFor(client);
@@ -432,8 +527,10 @@ namespace T3LabCAD.Core
                 if (step > 0) agent.Step = Math.Min(step, Math.Max(1, agent.Tasks.Count));
                 if (done) { agent.PlanDone = true; agent.Step = agent.Tasks.Count; }
                 agent.LastSeen = DateTime.Now;
+                name = agent.Name;
             }
             Refresh();
+            if (done && Enabled && ShowOnDrawing) PointerState(name, CursorOverlay.Mode.Finished, "done");
         }
 
         static string Clip(string s, int max) => s.Length <= max ? s : s.Substring(0, max - 1) + "…";
@@ -663,15 +760,19 @@ namespace T3LabCAD.Core
 
         // ---------------------------------------------------------------- UI glue (main thread)
 
+        internal enum AgentState { Idle, Thinking, Queued, Blocked, Working, Paused }
+
         internal sealed class AgentView
         {
-            public string Name, Status, Goal, Now;
+            public string Name, Status, Goal, Now, Behind;
             public System.Drawing.Color Color;
             public List<string> Tasks;
-            public int Step;
+            public int Step, Ahead;
             public bool PlanDone, Working;
+            public AgentState State;
             public ActionKind NowAction;
             public double NowSeconds;
+            public DateTime? LastEnd;
             public int Calls, Changes;
         }
 
@@ -704,9 +805,11 @@ namespace T3LabCAD.Core
                     Paused = Paused, ShowOnDrawing = ShowOnDrawing, ZoomToWork = ZoomToWork,
                     Touched = Touched.TryGetValue(active, out HashSet<string> set) ? set.Count : 0,
                 };
-                foreach (AgentInfo a in Agents.Values.OrderByDescending(x => x.LastSeen))
+                foreach (AgentInfo a in AllAgents().OrderByDescending(x => x.LastSeen))
                 {
                     AgentStep cur = a.Current;
+                    AgentState state = StateOf(a, cur);
+                    DateTime since = cur == null ? DateTime.Now : cur.OnMain ? cur.RunStarted : cur.Granted != default ? cur.Granted : cur.Started;
                     v.Agents.Add(new AgentView
                     {
                         Name = a.Name,
@@ -718,18 +821,23 @@ namespace T3LabCAD.Core
                         Working = cur != null,
                         Now = cur?.Caption,
                         NowAction = cur?.Action ?? ActionKind.Read,
-                        NowSeconds = cur == null ? 0 : (DateTime.Now - cur.Started).TotalSeconds,
-                        Status = Paused ? "Paused" : cur != null ? "Working" : (DateTime.Now - a.LastSeen).TotalSeconds < 15 ? "Thinking" : "Idle",
+                        NowSeconds = cur == null ? 0 : (DateTime.Now - since).TotalSeconds,
+                        State = state,
+                        Status = StatusText(state, cur),
+                        Ahead = cur?.Ahead ?? 0,
+                        Behind = cur?.Behind,
+                        LastEnd = a.LastEnd,
                         Calls = a.Calls,
                         Changes = a.Changes,
                     });
                 }
                 foreach (AgentStep s in Feed)
                 {
+                    AgentInfo a = Agents.TryGetValue(s.Agent, out AgentInfo live) ? live : Retired.TryGetValue(s.Agent, out AgentInfo old) ? old : null;
                     v.Feed.Add(new StepView
                     {
-                        Agent = Agents.TryGetValue(s.Agent, out AgentInfo a) ? a.Name : s.Agent,
-                        Color = a?.Color ?? System.Drawing.Color.Gray,
+                        Agent = a?.Name ?? Label(s.Agent),
+                        Color = a?.Color ?? C(T3Style.Action("Read")),
                         Caption = s.Caption,
                         Error = s.Error,
                         Action = s.Action,
@@ -740,6 +848,32 @@ namespace T3LabCAD.Core
                     });
                 }
                 return v;
+            }
+        }
+
+        static AgentState StateOf(AgentInfo a, AgentStep cur)
+        {
+            if (Paused) return AgentState.Paused;
+            if (cur != null)
+            {
+                if (cur.Queued) return AgentState.Queued;
+                bool waits = !cur.OnMain && cur.Granted != default && (DateTime.Now - cur.Granted).TotalSeconds > BlockedAfterS;
+                return waits ? AgentState.Blocked : AgentState.Working;
+            }
+            if (!a.PlanDone && a.LastEnd.HasValue && (DateTime.Now - a.LastEnd.Value).TotalSeconds < ThinkS) return AgentState.Thinking;
+            return AgentState.Idle;
+        }
+
+        static string StatusText(AgentState state, AgentStep cur)
+        {
+            switch (state)
+            {
+                case AgentState.Paused: return "Paused";
+                case AgentState.Queued: return cur.Ahead > 0 ? $"In line · {cur.Ahead} ahead" : "In line · next";
+                case AgentState.Blocked: return "Waiting for AutoCAD";
+                case AgentState.Working: return "Working";
+                case AgentState.Thinking: return "Thinking";
+                default: return "Idle";
             }
         }
 
@@ -821,6 +955,8 @@ namespace T3LabCAD.Core
                 try { doc.Editor.SetImpliedSelection(ids.ToArray()); }
                 catch (Exception ex) { Write("T3Lab Agent Cursors: could not select (" + ex.Message + ")."); return; }
             }
+            if (_overlay == null) _overlay = new CursorOverlay();
+            _overlay.ZoomTo(doc, ids, new List<Extents3d>());
             Write($"T3Lab Agent Cursors: {ids.Count} entities the AI changed are selected.");
         }
 
@@ -842,9 +978,9 @@ namespace T3LabCAD.Core
             lock (Gate)
                 steps = Feed.Where(s => s.State == StepState.Ok && s.Action != ActionKind.Read && s.Action != ActionKind.View &&
                                         string.Equals(s.Document, doc.Name, StringComparison.OrdinalIgnoreCase))
-                    .Reverse().Select(s => Tuple.Create(Agents.TryGetValue(s.Agent, out AgentInfo a) ? a : null, s))
+                    .Reverse().Select(s => Tuple.Create(Agents.TryGetValue(s.Agent, out AgentInfo a) ? a : Retired.TryGetValue(s.Agent, out AgentInfo r) ? r : null, s))
                     .Where(t => t.Item1 != null).ToList();
-            if (steps.Count == 0) { Write("T3Lab Agent Cursors: no change to replay in this drawing."); return; }
+            if (steps.Count == 0) { Write("T3Lab Agent Cursors: no change to replay in this drawing."); return; }   // same words as Revit's toast
             if (_overlay == null) _overlay = new CursorOverlay();
             _overlay.Replay(doc, steps.Select(t => Tuple.Create(t.Item1.Name, t.Item1.Color, t.Item2, TargetsOf(doc.Database, t.Item2, MaxCapture))).ToList());
         }
@@ -855,7 +991,8 @@ namespace T3LabCAD.Core
             {
                 Feed.Clear();
                 Touched.Clear();
-                foreach (AgentInfo a in Agents.Values) { a.Goal = null; a.Tasks.Clear(); a.Step = 0; a.Calls = 0; a.Changes = 0; }
+                Retired.Clear();
+                foreach (AgentInfo a in AllAgents()) { a.Goal = null; a.Tasks.Clear(); a.Step = 0; a.Calls = 0; a.Changes = 0; }
             }
             _overlay?.Clear();
             RefreshNow();
@@ -880,14 +1017,58 @@ namespace T3LabCAD.Core
                     P("step", Int("The task you are on now, 1-based")),
                     P("done", Bool("All tasks are finished"))),
                 NarrateHandler, needsDocument: false, tx: false, background: true);
+
+            // main thread (not background): turning it on builds the palette
+            Registry.Add(ControlTool, "Agent Cursors", ToolKind.App,
+                "The T3Lab Agent Cursors bar that shows the user what AI apps do in AutoCAD. action=status (default): on or off, paused, " +
+                "options and each agent with its state. on: turn it on and show the bar. pause: refuse changes from every AI app until the " +
+                "user presses Resume. Only the user turns it off or resumes, on the bar or the ribbon.",
+                Obj(P("action", Enum("What to do (default status)", "status", "on", "pause"))),
+                ControlHandler, needsDocument: false, tx: false, duringCommand: true);
         }
+
+        static object ControlHandler(ToolContext unused, Args a)
+        {
+            string action = (a.Str("action") ?? "status").Trim().ToLowerInvariant();
+            switch (action)
+            {
+                case "status": break;
+                case "on":
+                    if (!Enabled) SetEnabled(true);
+                    else ShowUi(true);
+                    break;
+                case "pause":
+                    if (!Enabled) SetEnabled(true);
+                    SetPaused(true);
+                    break;
+                case "off":
+                case "resume":
+                    // the bar is the user's oversight: an AI app never hides its own work or lifts the user's pause
+                    throw new ToolError("Only the user turns Agent Cursors off or resumes AI changes, on the bar or the ribbon.");
+                default:
+                    throw new ToolError("action: status, on or pause.");
+            }
+            View v = Snapshot();
+            return new Dictionary<string, object>
+            {
+                ["enabled"] = Enabled,
+                ["paused"] = v.Paused,
+                ["show_on_drawing"] = v.ShowOnDrawing,
+                ["follow"] = v.ZoomToWork,
+                ["agents"] = v.Agents.Select(x => (object)new Dictionary<string, object>
+                {
+                    ["name"] = x.Name, ["state"] = x.Status, ["calls"] = x.Calls, ["changes"] = x.Changes, ["goal"] = x.Goal,
+                }).ToList(),
+            };
+        }
+
 
         static object NarrateHandler(ToolContext unused, Args a)
         {
             List<string> tasks = a.Has("tasks") ? a.Strs("tasks").Where(t => !string.IsNullOrWhiteSpace(t)).ToList() : null;
             Narrate(CurrentAgent, a.Str("goal"), tasks, a.Int("step", 0), a.Bool("done", false));
             var result = new Dictionary<string, object> { ["shown"] = Enabled };
-            if (!Enabled) result["note"] = "Agent Cursors is off in AutoCAD; the user turns it on with T3CURSORS (T3Lab ribbon).";
+            if (!Enabled) result["note"] = "Agent Cursors is off in AutoCAD; the user turns it on with T3CURSORS (ribbon Add-ins > T3Lab MCP).";
             return result;
         }
     }
