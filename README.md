@@ -217,18 +217,29 @@ Cùng đường đi với MCP (tier, audit, hàng đợi, Agent Cursors ghi "cli
 
 AutoCAD chỉ chạy một lời gọi một lúc. Add-in xếp hàng công bằng (`Conductor.cs`): người đang chat trước bot, rồi xoay vòng theo từng agent (một agent gọi dồn dập không chặn agent khác). Lời gọi chờ quá hạn (`queue_wait_s`, mặc định 45 s) thì **không chạy** và trả về `{"error_code": "autocad_busy", "nothing_ran": true, "retry_after_s": …, "running": {...}}`, nên không có thay đổi nào xảy ra sau khi AI đã bỏ cuộc. `cancel_command` và `t3lab_narrate` không phải xếp hàng. `T3MCPSTATUS` và `health` cho thấy ai đang giữ AutoCAD và bao nhiêu lời gọi đang chờ.
 
-Tuỳ chọn thêm vào `args` của server `t3lab-autocad` trong config AI app (hoặc biến môi trường):
+Tuỳ chọn thêm vào `args` của server `t3lab-autocad` trong config AI app (hoặc biến môi trường; tiền tố `T3LABCAD_` riêng, nên biến `T3LAB_*` của T3Lab pyRevit không ảnh hưởng tới add-in này):
 
 | Tuỳ chọn | Biến | Việc |
 |---|---|---|
-| `--tier=read` · `trusted` · `experimental` | `T3LAB_TIER` | `read`: chỉ tool đọc · `trusted`: thêm tool sửa bản vẽ / ghi file · `experimental` (mặc định): thêm `run_command`. Tool vượt tier bị ẩn và bị từ chối (`tier_denied`) trước khi tới AutoCAD |
-| `--deny=a,b` | `T3LAB_DENY` | Tắt vài tool cho client này (`tool_denied`) |
-| `--agent=<tên>` | `T3LAB_AGENT` | Tên hiện trên Agent Cursors (mặc định: tên app) |
-| `--lane=person` · `task` · `auto` | `T3LAB_LANE` | Thứ tự hàng đợi (bot tự chạy: `auto`). Chỉ xếp thứ tự, không cấp quyền |
-| `--queue-wait=45` | `T3LAB_QUEUE_WAIT_S` | Thời gian chờ tối đa (giây) để tới lượt |
-| `--audit=0` | `T3LAB_AUDIT=0` | Tắt nhật ký `%APPDATA%\T3LabCAD\audit\<ngày>.jsonl` (mỗi lời gọi một dòng: agent, tool, ok / error_code, thời gian; không ghi tham số) |
+| `--tier=read` · `trusted` · `experimental` | `T3LABCAD_TIER` | `read`: chỉ tool đọc · `trusted`: thêm tool sửa bản vẽ / ghi file · `experimental` (mặc định): thêm `run_command`. Tool vượt tier bị ẩn và bị từ chối (`tier_denied`) trước khi tới AutoCAD |
+| `--deny=a,b` | `T3LABCAD_DENY` | Tắt vài tool cho client này (`tool_denied`) |
+| `--agent=<tên>` | `T3LABCAD_AGENT` | Tên hiện trên Agent Cursors (mặc định: tên app) |
+| `--lane=person` · `task` · `auto` | `T3LABCAD_LANE` | Thứ tự hàng đợi (bot tự chạy: `auto`). Chỉ xếp thứ tự, không cấp quyền |
+| `--queue-wait=45` | `T3LABCAD_QUEUE_WAIT_S` | Thời gian chờ tối đa (giây) để tới lượt |
+| `--audit=0` | `T3LABCAD_AUDIT=0` | Tắt nhật ký `%APPDATA%\T3LabCAD\audit\<ngày>.jsonl` (mỗi lời gọi một dòng: agent, tool, ok / error_code, thời gian; không ghi tham số) |
 
 Lỗi có `error_code` là JSON `{error_code, message, retryable, nothing_ran, hint}`: `autocad_busy`, `paused_by_user` (add-in); `tier_denied`, `tool_denied`, `autocad_not_running`, `timeout`, `bridge_error` (bridge).
+
+## Chạy cùng T3Lab (pyRevit extension)
+
+MCP Control › Connect của T3Lab (t3lab-revit-api) cài **chính gói này** (`T3LabCAD.zip` của release mới nhất) và ghi cùng một entry `t3lab-autocad` = `python -I %APPDATA%\T3LabCAD\bridge.py`, giống Connect AI ở đây, nên ai ghi sau cũng đúng. Giữ được vì:
+
+| Hợp đồng | Ở đâu |
+|---|---|
+| Zip chỉ có `T3LabCAD.bundle/`, `T3LabCAD/`, `manifest.json` (installer của T3Lab từ chối file khác) | `scripts/package.py` dừng build nếu có file lạ |
+| `bridge.py` chạy không tham số = MCP stdio | `main()` của bridge |
+| Loader cũ + Core mới (Connect cập nhật khi AutoCAD đang mở, Loader bị khoá): `Entry.Start(string, Action)`, `Stop`, `Status`, `ToggleAgentCursors` giữ nguyên chữ ký | `src/T3LabCAD.Core/Entry.cs` |
+| Cổng 48900–48908 (T3Lab: 48884–48894, T3Lab Revit MCP: 48910–48918), biến môi trường `T3LABCAD_*` (T3Lab dùng `T3LAB_*`) | bridge, `src/T3LabCAD.Core/Entry.cs` |
 
 ## An toàn
 

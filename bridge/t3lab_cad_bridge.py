@@ -30,12 +30,12 @@ runs later. The client also carries session (this process id), so two chats of
 one app are two agents on the Agent Cursors bar.
 
 Options (flag or environment variable), for the MCP client config:
-    --agent=<name>    T3LAB_AGENT         name on the Agent Cursors bar (default: the app's clientInfo)
-    --tier=<tier>     T3LAB_TIER          read | trusted | experimental (default; run_command)
-    --deny=a,b        T3LAB_DENY          tools this client may not call
-    --lane=<lane>     T3LAB_LANE          person (default) | task | auto: queue order, never permissions
-    --queue-wait=<s>  T3LAB_QUEUE_WAIT_S  longest wait for a turn in AutoCAD (default 45, under clients' ~60 s)
-    --audit=0         T3LAB_AUDIT=0       no audit log (%APPDATA%/T3LabCAD/audit/<day>.jsonl)
+    --agent=<name>    T3LABCAD_AGENT         name on the Agent Cursors bar (default: the app's clientInfo)
+    --tier=<tier>     T3LABCAD_TIER          read | trusted | experimental (default; run_command)
+    --deny=a,b        T3LABCAD_DENY          tools this client may not call
+    --lane=<lane>     T3LABCAD_LANE          person (default) | task | auto: queue order, never permissions
+    --queue-wait=<s>  T3LABCAD_QUEUE_WAIT_S  longest wait for a turn in AutoCAD (default 45, under clients' ~60 s)
+    --audit=0         T3LABCAD_AUDIT=0       no audit log (%APPDATA%/T3LabCAD/audit/<day>.jsonl)
 
 Stdlib only.
 """
@@ -145,13 +145,13 @@ def option(name, env, default=None):
 
 TIERS = ("read", "trusted", "experimental")
 EXPERIMENTAL = {"run_command"}     # any AutoCAD command line: only for clients with a person at the keyboard
-AGENT = (option("agent", "T3LAB_AGENT") or "").strip()[:64] or None
-TIER = (option("tier", "T3LAB_TIER") or "experimental").strip().lower()
-DENY = {t.strip() for t in (option("deny", "T3LAB_DENY") or "").split(",") if t.strip()}
-LANE = (option("lane", "T3LAB_LANE") or "person").strip().lower()
-AUDIT = (option("audit", "T3LAB_AUDIT") or "1").strip().lower() not in ("0", "off", "false", "no")
+AGENT = (option("agent", "T3LABCAD_AGENT") or "").strip()[:64] or None
+TIER = (option("tier", "T3LABCAD_TIER") or "experimental").strip().lower()
+DENY = {t.strip() for t in (option("deny", "T3LABCAD_DENY") or "").split(",") if t.strip()}
+LANE = (option("lane", "T3LABCAD_LANE") or "person").strip().lower()
+AUDIT = (option("audit", "T3LABCAD_AUDIT") or "1").strip().lower() not in ("0", "off", "false", "no")
 try:
-    QUEUE_WAIT_S = max(1.0, min(1800.0, float(option("queue-wait", "T3LAB_QUEUE_WAIT_S") or 45)))
+    QUEUE_WAIT_S = max(1.0, min(1800.0, float(option("queue-wait", "T3LABCAD_QUEUE_WAIT_S") or 45)))
 except ValueError:
     QUEUE_WAIT_S = 45.0
 SESSION = str(os.getpid())

@@ -2,7 +2,7 @@
 
     python scripts/package.py            # after building R24, R25 and R26 (see README)
 
-Zip layout, read by install.ps1 and by T3Lab's MCP Control (Connect installs it):
+Zip layout, read by install.ps1 and by T3Lab's MCP Control (Connect installs it; nothing else may sit at the top):
     T3LabCAD.bundle/PackageContents.xml
     T3LabCAD.bundle/Contents/<R24|R25|R26>/T3LabCAD.Loader.dll, T3LabCAD.Core.dll
     T3LabCAD/bridge.py, T3LabCAD/tools_snapshot.json, T3LabCAD/register_mcp.py (Connect AI)
@@ -56,8 +56,14 @@ def build(dest=None):
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     manifest = {"name": "T3LabCAD", "version": version(), "series": SERIES,
                 "bundle": "T3LabCAD.bundle", "bridge": "T3LabCAD/bridge.py"}
+    files = entries()
+    # T3Lab (pyRevit) MCP Control's Connect installs this zip and refuses any other top-level entry
+    # (t3lab-revit-api Services/addin_installer.py _safe_members)
+    stray = [arc for _, arc in files if not arc.startswith(("T3LabCAD.bundle/", "T3LabCAD/"))]
+    if stray:
+        raise SystemExit("Only T3LabCAD.bundle/, T3LabCAD/ and manifest.json may be at the top of the zip: " + ", ".join(stray))
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
-        for src, arc in entries():
+        for src, arc in files:
             z.write(src, arc)
         z.writestr("manifest.json", json.dumps(manifest, indent=2))
     return dest

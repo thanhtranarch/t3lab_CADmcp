@@ -61,7 +61,8 @@ check.failed = 0
 
 def main():
     appdata = tempfile.mkdtemp(prefix="t3labcad_test_")
-    env = dict(os.environ, T3LABCAD_PORT_RANGE="49900-49902", APPDATA=appdata)
+    # T3Lab (pyRevit) bridge variables must not reach this bridge (own prefix T3LABCAD_)
+    env = dict(os.environ, T3LABCAD_PORT_RANGE="49900-49902", APPDATA=appdata, T3LAB_TIER="read", T3LAB_DENY="get_status", T3LAB_AGENT="pyrevit")
 
     # 1. no AutoCAD
     c = Client(env)
@@ -102,7 +103,7 @@ def main():
         r = c.request("tools/call", {"name": "busy", "arguments": {}})["result"]
         body = json.loads(r["content"][0]["text"])
         check("autocad_busy passthrough", r.get("isError") and body["error_code"] == "autocad_busy" and body["nothing_ran"], r)
-        check("experimental tool listed by default", "run_command" in tools, tools)
+        check("experimental tool listed by default, T3LAB_* of T3Lab pyRevit ignored", "run_command" in tools and "get_status" in tools, tools)
         r = c.request("tools/call", {"name": "get_status", "arguments": {"big": 200000}})["result"]
         check("large result capped", "[truncated" in r["content"][0]["text"] and len(r["content"][0]["text"]) < 100000)
         r = c.request("tools/call", {"name": "list_autocad_instances", "arguments": {}})["result"]
