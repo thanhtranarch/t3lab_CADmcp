@@ -32,8 +32,10 @@ namespace T3LabCAD.Core
         const double IdleHideS = AgentCursors.ThinkS + 10;
 
         static readonly IntegerCollection AllViewports = new IntegerCollection();
-        static readonly SysColor Created = SysColor.FromArgb(0x14, 0xAE, 0x5C), Erased = SysColor.FromArgb(0xF2, 0x48, 0x22);
-        static readonly AcColor Ink = AcColor.FromRgb(0x1F, 0x29, 0x37);
+        // frame colours, the same as T3Lab Revit MCP's boxes (T3Style): created, changed, deleted; reads in the read colour
+        static readonly SysColor Created = AgentCursors.C(T3Style.Action("Create")), Changed = AgentCursors.C(T3Style.Action("Modify")),
+            Erased = AgentCursors.C(T3Style.Action("Delete"));
+        static readonly AcColor Ink = ToAcad(AgentCursors.C(T3Style.TagInk));
         static readonly List<Entity> Orphans = new List<Entity>();
 
         sealed class Leg
@@ -96,8 +98,7 @@ namespace T3LabCAD.Core
         static AcColor ToAcad(SysColor c) => AcColor.FromRgb(c.R, c.G, c.B);
 
         /// <summary>The colour mixed into white (amount 0 = white): the tag's wash, read with dark ink (10:1 or better).</summary>
-        static AcColor Pastel(SysColor c, double amount = 0.22) => AcColor.FromRgb(
-            (byte)Math.Round(255 + (c.R - 255) * amount), (byte)Math.Round(255 + (c.G - 255) * amount), (byte)Math.Round(255 + (c.B - 255) * amount));
+        static AcColor Pastel(SysColor c, double amount = 0.2) => ToAcad(AgentCursors.C(T3Style.Wash(unchecked((uint)c.ToArgb()), amount)));
 
         /// <summary>A size that looks the same on screen at any zoom: 1/45 of the view height.</summary>
         static double Unit(Document doc)
@@ -172,7 +173,7 @@ namespace T3LabCAD.Core
             double u = _u = Unit(doc);
             var boxes = new List<Tuple<Extents3d, SysColor, string>>();
             var created = new HashSet<string>(step.Created, StringComparer.OrdinalIgnoreCase); // main thread, like every writer
-            SysColor tint = step.Action == ActionKind.Read ? ActivityView.ActionColor(ActionKind.Read) : color;
+            SysColor tint = step.Action == ActionKind.Read || step.Action == ActionKind.View ? ActivityView.ActionColor(ActionKind.Read) : Changed;
             var union = new Extents3d();
             bool any = false;
             var subjects = new List<string>();

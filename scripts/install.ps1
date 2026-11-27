@@ -82,6 +82,7 @@ $data = Join-Path $env:APPDATA "T3LabCAD"
 Step "Bridge -> $data\bridge.py"
 New-Item -ItemType Directory -Force $data | Out-Null
 Copy-Item "$root\bridge\t3lab_cad_bridge.py" "$data\bridge.py" -Force
+Copy-Item "$root\scripts\register_mcp.py" "$data\register_mcp.py" -Force   # Connect AI on the ribbon runs it
 if (Test-Path "$root\bridge\tools_snapshot.json") { Copy-Item "$root\bridge\tools_snapshot.json" "$data\tools_snapshot.json" -Force }
 
 # ---------------------------------------------------------------- python
@@ -101,14 +102,15 @@ Write-Host "  python: $Python"
 $bridgePath = ("$data\bridge.py" -replace '\\', '/')
 if (-not $NoClaudeConfig) {
     Step "Claude Desktop config"
-    & $Python -I "$root\scripts\register_mcp.py" $bridgePath $Python
+    & $Python -I "$data\register_mcp.py" --bridge $bridgePath --python $Python --clients claude-desktop
     if ($LASTEXITCODE -eq 3) { Write-Warning "Claude Desktop not updated (it is running). Quit it and run: install.ps1 -SkipBuild" }
     elseif ($LASTEXITCODE -ne 0) { throw "register_mcp.py failed" }
 }
 if ($ClaudeCode) {
     Step "Claude Code (user scope)"
-    claude mcp add --scope user t3lab-autocad -- $Python -I $bridgePath
+    & $Python -I "$data\register_mcp.py" --bridge $bridgePath --python $Python --clients claude-code
 }
+Write-Host "  Other AI apps (Codex, Cursor, VS Code, Gemini CLI, Windsurf, Antigravity): Connect AI on the Add-ins tab in AutoCAD."
 
 Step "Done"
 if ($restartNeeded) {

@@ -66,13 +66,17 @@ namespace T3LabCAD.Core
             Log.Info("stopped");
         }
 
+        public static bool Running => _server != null;
+
+        /// <summary>Same lines as T3Lab Revit MCP's Status.</summary>
         public static string Status()
         {
-            if (_server == null) return $"T3LabCAD MCP v{Version}: stopped (T3MCPSTART to start)";
+            if (_server == null) return $"T3Lab CAD MCP v{Version}: stopped (Start / Stop on the Add-ins tab, or T3MCP, starts it).";
             string last = string.IsNullOrEmpty(LastCall) ? "none" : LastCall;
             var q = Queue.Status();
             string queue = (bool)q["busy"] ? $"busy ({q["tool"]}), {q["waiting"]} waiting" : "free";
-            return $"T3LabCAD MCP v{Version}: listening on 127.0.0.1:{_server.Port} | {Registry.Count} tools | {CallCount} calls | last: {last} | queue: {queue}";
+            return $"T3Lab CAD MCP v{Version}: listening on 127.0.0.1:{_server.Port}\n{Registry.Count} tools · {CallCount} calls · last: {last}\n" +
+                   $"Queue: {queue}\nAgent Cursors: {(AgentCursors.Enabled ? "on" : "off")}\nLog: {Log.FilePath}";
         }
 
         internal static int Port => _server?.Port ?? 0;
@@ -80,7 +84,7 @@ namespace T3LabCAD.Core
         /// <summary>T3CURSORS (Loader command / ribbon): turn Agent Cursors on or off. Main thread; returns the message to show.</summary>
         public static string ToggleAgentCursors()
         {
-            if (_server == null) return "T3LabCAD MCP is stopped (T3MCPSTART first).";
+            if (_server == null) return "T3Lab CAD MCP is stopped (press Start first).";
             return AgentCursors.Toggle();
         }
 

@@ -16,9 +16,12 @@ namespace T3LabCAD.Loader
     /// "ACAD."), so it is found by the end of its id, then by title. A timer keeps looking for WatchS after start or a
     /// workspace switch: CUIx tabs can arrive after the ribbon. Only when none has appeared after RetryS does the panel go
     /// on a stand-in tab titled "Add-ins", and it moves to the real tab if that shows up while the timer still runs.
+    /// Same buttons, order, names, icons (T3Icons) and tooltips as T3Lab Revit MCP's panel on Revit's Add-Ins tab:
+    /// [Start / Stop] [Agent Cursors] [Connect AI] [Status | Reload].
     /// </summary>
     internal static class T3Ribbon
     {
+        const string Host = "AutoCAD";
         const string PanelId = "T3LAB_CAD_MCP_PANEL", FallbackTabId = "T3LAB_CAD_ADDINS_FALLBACK", OldTabId = "T3LAB_CAD_MCP_TAB";
         const double RetryS = 15, WatchS = 120;
         static readonly string[] AddinsIds = { "ID_TabAddins", "ID_TabAddIns", "ID_ADDINSTAB", "ID_TabPlugins" };
@@ -73,7 +76,7 @@ namespace T3LabCAD.Loader
                         if (string.Equals(e.Name, "WSCURRENT", StringComparison.OrdinalIgnoreCase)) { _firstTry = default; Build(); }
                         else if (string.Equals(e.Name, "COLORTHEME", StringComparison.OrdinalIgnoreCase)) Repaint();
                     }
-                    catch (Exception ex) { CoreHost.Write("T3LabCAD: ribbon panel not updated: " + ex.Message); }
+                    catch (Exception ex) { CoreHost.Write("T3Lab CAD MCP: ribbon panel not updated: " + ex.Message); }
                 };
             }
 
@@ -99,7 +102,7 @@ namespace T3LabCAD.Loader
                     if (!_reported)
                     {
                         _reported = true;
-                        CoreHost.Write("T3LabCAD: this workspace has no Add-ins ribbon tab; the T3Lab MCP panel is on a tab named Add-ins of its own.");
+                        CoreHost.Write("T3Lab CAD MCP: this workspace has no Add-ins ribbon tab; the T3Lab MCP panel is on a tab named Add-ins of its own.");
                     }
                 }
             }
@@ -111,11 +114,23 @@ namespace T3LabCAD.Loader
 
             Buttons.Clear();
             var source = new RibbonPanelSource { Title = "T3Lab MCP", Id = PanelId };
-            source.Items.Add(Button("Start", "T3MCPSTART", "Start the MCP server so Claude can connect", "start"));
-            source.Items.Add(Button("Stop", "T3MCPSTOP", "Stop the MCP server", "stop"));
-            source.Items.Add(Button("Status", "T3MCPSTATUS", "Show port, tool count, the call queue and the last call", "status"));
-            source.Items.Add(Button("Reload", "T3MCPRELOAD", "Reload T3LabCAD.Core.dll after installing a new build", "reload"));
-            source.Items.Add(Button("Agent\nCursors", "T3CURSORS", "Show what AI apps do in AutoCAD: a bar with each app, its goal and steps, and pointers on the drawing", "cursors"));
+            source.Items.Add(Button("Start /\nStop", "T3MCP", "power", true,
+                $"Start or stop the MCP server that lets AI apps (Claude, ChatGPT / Codex, Cursor, Gemini...) work in this {Host}. " +
+                $"Stopped, it stays stopped at the next {Host} start until you press Start again."));
+            source.Items.Add(Button("Agent\nCursors", "T3CURSORS", "cursors", true,
+                $"Show what each AI app does in {Host}: its goal, the current step, the last calls and the entities it touched. " +
+                "Pause AI changes at any time. Press again to turn it off."));
+            source.Items.Add(Button("Connect\nAI", "T3MCPCONNECT", "connect", true,
+                $"Add this {Host} to Claude Desktop, Claude Code, Codex, Cursor, VS Code, Gemini CLI, Windsurf and Antigravity in one click, " +
+                "or check what is connected."));
+            // Status and Reload stacked, as on Revit's panel
+            var row = new RibbonRowPanel();
+            row.Items.Add(Button("Status", "T3MCPSTATUS", "status", false,
+                "Server status: port, tools, calls, the call queue, Agent Cursors and the log folder."));
+            row.Items.Add(new RibbonRowBreak());
+            row.Items.Add(Button("Reload", "T3MCPRELOAD", "reload", false,
+                $"Load T3LabCAD.Core.dll again after an update, without restarting {Host}."));
+            source.Items.Add(row);
             tab.Panels.Add(new RibbonPanel { Source = source });
         }
 
@@ -151,7 +166,7 @@ namespace T3LabCAD.Loader
                     catch (Exception ex)
                     {
                         _watch.Stop();
-                        CoreHost.Write("T3LabCAD: ribbon panel not created: " + ex.Message);
+                        CoreHost.Write("T3Lab CAD MCP: ribbon panel not created: " + ex.Message);
                     }
                 };
             }
@@ -160,7 +175,7 @@ namespace T3LabCAD.Loader
 
         static readonly List<KeyValuePair<RibbonButton, string>> Buttons = new List<KeyValuePair<RibbonButton, string>>();
 
-        static RibbonButton Button(string text, string command, string tip, string icon)
+        static RibbonButton Button(string text, string command, string icon, bool large, string tip)
         {
             bool dark = IsDarkTheme();
             var button = new RibbonButton
@@ -168,10 +183,10 @@ namespace T3LabCAD.Loader
                 Text = text,
                 ShowText = true,
                 ShowImage = true,
-                Size = RibbonItemSize.Large,
-                Orientation = System.Windows.Controls.Orientation.Vertical,
-                LargeImage = Icon(icon, 32, dark),
-                Image = Icon(icon, 16, dark),
+                Size = large ? RibbonItemSize.Large : RibbonItemSize.Standard,
+                Orientation = large ? System.Windows.Controls.Orientation.Vertical : System.Windows.Controls.Orientation.Horizontal,
+                LargeImage = T3Icons.Get(icon, 32, dark),
+                Image = T3Icons.Get(icon, 16, dark),
                 ToolTip = tip,
                 CommandParameter = command,
                 CommandHandler = new SendCommand(),
@@ -185,8 +200,8 @@ namespace T3LabCAD.Loader
             bool dark = IsDarkTheme();
             foreach (var item in Buttons)
             {
-                item.Key.LargeImage = Icon(item.Value, 32, dark);
-                item.Key.Image = Icon(item.Value, 16, dark);
+                item.Key.LargeImage = T3Icons.Get(item.Value, 32, dark);
+                item.Key.Image = T3Icons.Get(item.Value, 16, dark);
             }
         }
 
@@ -194,73 +209,6 @@ namespace T3LabCAD.Loader
         {
             try { return Convert.ToInt32(AcApp.GetSystemVariable("COLORTHEME")) == 0; }
             catch { return true; }   // AutoCAD's default theme is dark
-        }
-
-        // Icon family (T3Lab style: round 2-unit strokes on a 32 grid, one orange accent): every button is
-        // the MCP server (two rack units) with an orange badge saying what the button does.
-        static readonly string[] Server =
-        {
-            "M6,4 H20 Q22,4 22,6 V10 Q22,12 20,12 H6 Q4,12 4,10 V6 Q4,4 6,4 Z",
-            "M6,15 H20 Q22,15 22,17 V21 Q22,23 20,23 H6 Q4,23 4,21 V17 Q4,15 6,15 Z",
-        };
-        static readonly string[] ServerDetail = { "M12,8 H17", "M12,19 H17" };
-        static readonly string[] ServerLeds = { "M8,8 L8,8.01", "M8,19 L8,19.01" };
-        static readonly Dictionary<string, string> Badge = new Dictionary<string, string>
-        {
-            ["start"] = "M22.6,20.8 L27.4,24 L22.6,27.2 Z",
-            ["stop"] = "M21.8,21.8 H26.2 V26.2 H21.8 Z",
-            ["status"] = "M19.8,24 H21.4 L22.7,21.2 L25.3,26.8 L26.6,24 H28.2",
-            ["reload"] = "M27.6,24 A3.6,3.6 0 1 1 26.4,21.3 M27,19.4 V21.6 H24.8",
-            ["cursors"] = "M21.6,20.4 L21.6,27.4 L23.4,25.7 L24.8,28.2 L26,27.6 L24.7,25.2 L27.2,25 Z",
-        };
-        // Play / stop read as media glyphs only when solid; drawn hollow they looked like "D" and "o".
-        static readonly HashSet<string> SolidBadge = new HashSet<string> { "start", "stop", "cursors" };
-
-        /// <summary>Icon of `size` x `size` pixels at 96 DPI.</summary>
-        /// <remarks>AutoCAD's ribbon shows a bitmap at its pixel size and ignores its DPI: a 64 px image at
-        /// 192 DPI showed only its top-left quarter (one rack, no badge). So the bitmap is exactly the
-        /// ribbon slot (32 large / 16 small) and AutoCAD scales it on high-DPI screens like any other icon.</remarks>
-        static ImageSource Icon(string name, int size, bool dark)
-        {
-            Color ink = dark ? Color.FromRgb(0xF2, 0xF2, 0xF2) : Color.FromRgb(0x1A, 0x1A, 0x1A);
-            Color ink2 = dark ? Color.FromRgb(0xA3, 0xA3, 0xA3) : Color.FromRgb(0x66, 0x66, 0x66);
-            Color signal = dark ? Color.FromRgb(0xF2, 0x75, 0x22) : Color.FromRgb(0xEA, 0x68, 0x0C);
-            var visual = new DrawingVisual();
-            using (DrawingContext dc = visual.RenderOpen())
-            {
-                // At 16 px a 2-unit stroke is 1 px wide and centred on a pixel edge (blurred over 2 px);
-                // moving up-left half a pixel lands it on whole pixels, and the badge still fits inside 16 px.
-                double nudge = size < 32 ? -0.5 : 0.0;
-                var transform = new TransformGroup();
-                transform.Children.Add(new ScaleTransform(size / 32.0, size / 32.0));
-                transform.Children.Add(new TranslateTransform(nudge, nudge));
-                dc.PushTransform(transform);
-                // The server is cut back around the badge so the two never touch.
-                dc.PushClip(new CombinedGeometry(GeometryCombineMode.Exclude,
-                    new RectangleGeometry(new Rect(0, 0, 32, 32)), new EllipseGeometry(new Point(24, 24), 8.8, 8.8)));
-                foreach (string d in Server) Stroke(dc, d, ink, 2.0);
-                foreach (string d in ServerDetail) Stroke(dc, d, ink2, 2.0);
-                foreach (string d in ServerLeds) Stroke(dc, d, ink2, 3.0);
-                dc.Pop();
-                var fill = new SolidColorBrush(signal);
-                dc.DrawEllipse(fill, new Pen(fill, 2.0), new Point(24, 24), 6.5, 6.5);
-                Stroke(dc, Badge[name], Colors.White, 1.8, SolidBadge.Contains(name));
-                dc.Pop();
-            }
-            var bmp = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
-            bmp.Render(visual);
-            bmp.Freeze();
-            return bmp;
-        }
-
-        static void Stroke(DrawingContext dc, string path, Color color, double width, bool fill = false)
-        {
-            var brush = new SolidColorBrush(color);
-            var pen = new Pen(brush, width)
-            {
-                StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round,
-            };
-            dc.DrawGeometry(fill ? brush : null, pen, Geometry.Parse(path));
         }
 
         /// <summary>Ribbon buttons run their command through the command line (cancelling whatever is active).</summary>

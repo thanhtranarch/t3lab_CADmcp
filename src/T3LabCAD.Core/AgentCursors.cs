@@ -89,10 +89,11 @@ namespace T3LabCAD.Core
         {
             try
             {
+                ShowOnDrawing = true;   // on by default, as in T3Lab Revit MCP
                 if (!File.Exists(SettingsFile)) return;
                 var a = new Args(Json.Parse(File.ReadAllText(SettingsFile)));
                 Enabled = a.Bool("enabled", false);
-                ShowOnDrawing = a.Bool("show_on_drawing", false);
+                ShowOnDrawing = a.Bool("show_on_drawing", true);
                 ZoomToWork = a.Bool("zoom_to_work", false);
             }
             catch (Exception ex) { Log.Error("agent cursors settings: " + ex.Message); }
@@ -179,12 +180,10 @@ namespace T3LabCAD.Core
             if (Enabled && (_palette == null || !_palette.Alive || !_palette.Visible))
             {
                 ShowUi(true);
-                return "T3Lab Agent Cursors: bar shown. T3CURSORS again turns Agent Cursors off.";
+                return "T3Lab Agent Cursors: bar shown. Press Agent Cursors again to turn it off.";
             }
             SetEnabled(!Enabled);
-            return Enabled
-                ? "T3Lab Agent Cursors: on. The bar shows what each AI app does; tick \"Show on the drawing\" for cursors and boxes."
-                : "T3Lab Agent Cursors: off.";
+            return Enabled ? "T3Lab Agent Cursors: on. The bar shows what each AI app does." : "T3Lab Agent Cursors: off.";
         }
 
         public static void SetEnabled(bool on)
@@ -254,29 +253,11 @@ namespace T3LabCAD.Core
 
         // ---------------------------------------------------------------- agents
 
-        static readonly System.Drawing.Color[] Palette =
-        {
-            System.Drawing.Color.FromArgb(0xD9, 0x77, 0x57), System.Drawing.Color.FromArgb(0x0D, 0x99, 0xFF),
-            System.Drawing.Color.FromArgb(0x14, 0xAE, 0x5C), System.Drawing.Color.FromArgb(0xA2, 0x59, 0xFF),
-            System.Drawing.Color.FromArgb(0xE8, 0x46, 0x7C), System.Drawing.Color.FromArgb(0x00, 0xB5, 0xCE),
-            System.Drawing.Color.FromArgb(0xFF, 0xC7, 0x00), System.Drawing.Color.FromArgb(0xFF, 0x72, 0x62),
-        };
+        /// <summary>A T3Style colour (ARGB) as a System.Drawing colour.</summary>
+        internal static System.Drawing.Color C(uint argb) => System.Drawing.Color.FromArgb(unchecked((int)argb));
 
-        /// <summary>Display name and palette slot of an AI app from its MCP clientInfo.name.</summary>
-        static string Known(string rawName, out int slot)
-        {
-            string key = string.IsNullOrWhiteSpace(rawName) ? "ai" : rawName.Trim();
-            string lower = key.ToLowerInvariant();
-            if (lower.Contains("claude-code") || lower == "claude code") { slot = 0; return "Claude Code"; }
-            if (lower.Contains("claude")) { slot = 0; return "Claude"; }
-            if (lower.Contains("cursor")) { slot = 3; return "Cursor"; }
-            if (lower.Contains("codex") || lower.Contains("openai") || lower.Contains("chatgpt")) { slot = 2; return "ChatGPT"; }
-            if (lower.Contains("gemini") || lower.Contains("antigravity")) { slot = 1; return "Gemini"; }
-            if (lower.Contains("copilot") || lower.Contains("vscode") || lower.Contains("visual studio")) { slot = 5; return "Copilot"; }
-            if (lower.Contains("windsurf") || lower.Contains("cascade")) { slot = 4; return "Windsurf"; }
-            slot = key == "ai" ? 1 : (key.GetHashCode() & 0x7FFFFFFF) % Palette.Length;
-            return key == "ai" ? "AI" : key.Length > 16 ? key.Substring(0, 16) : key;
-        }
+        /// <summary>Display name and colour of an AI app (T3Style.Agent, shared with T3Lab Revit MCP).</summary>
+        static string Known(string rawName, out uint color) => T3Style.Agent(rawName, out color);
 
         /// <summary>
         /// One agent per chat: the key is "name#session" (the bridge's process id). A second chat of the same app is
@@ -286,8 +267,8 @@ namespace T3LabCAD.Core
         {
             string key = string.IsNullOrWhiteSpace(clientKey) ? "ai" : clientKey.Trim();
             if (Agents.TryGetValue(key, out AgentInfo known)) return known;
-            string name = Known(BaseName(key), out int slot);
-            List<AgentInfo> same = Agents.Values.Where(a => Known(BaseName(a.Key), out int unused) == name).ToList();
+            string name = Known(BaseName(key), out uint color);
+            List<AgentInfo> same = Agents.Values.Where(a => Known(BaseName(a.Key), out uint unused) == name).ToList();
             // a new chat inherits the name and colour of a chat of the same app that went quiet (bridges restart: names must
             // not climb to "7"); it starts with an empty plan, and the quiet one is retired, never shared by two live chats
             AgentInfo quiet = same.FirstOrDefault(a => a.Current == null && (DateTime.Now - a.LastSeen).TotalMinutes > QuietMinutes);
@@ -303,7 +284,7 @@ namespace T3LabCAD.Core
                 int n = 1;
                 string label = name;
                 while (same.Any(a => a.Name == label)) label = name + " " + ++n;
-                info = new AgentInfo { Key = key, Name = label, Color = Palette[(slot + (n - 1) * 3) % Palette.Length] };
+                info = new AgentInfo { Key = key, Name = label, Color = C(n == 1 ? color : T3Style.Extra(name, n)) };
             }
             Agents[key] = info;
             return info;
@@ -323,7 +304,7 @@ namespace T3LabCAD.Core
         }
 
         /// <summary>Who an agent is, for messages (no registration): "Claude Code".</summary>
-        public static string Label(string clientKey) => Known(BaseName(clientKey ?? "ai"), out int unused);
+        public static string Label(string clientKey) => Known(BaseName(clientKey ?? "ai"), out uint unused);
 
         /// <summary>"claude-code#4812" from the bridge's client {name, version, session}.</summary>
         public static string ClientKey(object raw)
@@ -844,7 +825,7 @@ namespace T3LabCAD.Core
                     v.Feed.Add(new StepView
                     {
                         Agent = a?.Name ?? Label(s.Agent),
-                        Color = a?.Color ?? System.Drawing.Color.Gray,
+                        Color = a?.Color ?? C(T3Style.Action("Read")),
                         Caption = s.Caption,
                         Error = s.Error,
                         Action = s.Action,
@@ -962,6 +943,8 @@ namespace T3LabCAD.Core
                 try { doc.Editor.SetImpliedSelection(ids.ToArray()); }
                 catch (Exception ex) { Write("T3Lab Agent Cursors: could not select (" + ex.Message + ")."); return; }
             }
+            if (_overlay == null) _overlay = new CursorOverlay();
+            _overlay.ZoomTo(doc, ids, new List<Extents3d>());
             Write($"T3Lab Agent Cursors: {ids.Count} entities the AI changed are selected.");
         }
 
@@ -985,7 +968,7 @@ namespace T3LabCAD.Core
                                         string.Equals(s.Document, doc.Name, StringComparison.OrdinalIgnoreCase))
                     .Reverse().Select(s => Tuple.Create(Agents.TryGetValue(s.Agent, out AgentInfo a) ? a : Retired.TryGetValue(s.Agent, out AgentInfo r) ? r : null, s))
                     .Where(t => t.Item1 != null).ToList();
-            if (steps.Count == 0) { Write("T3Lab Agent Cursors: no change to replay in this drawing."); return; }
+            if (steps.Count == 0) { Write("T3Lab Agent Cursors: no change to replay in this drawing."); return; }   // same words as Revit's toast
             if (_overlay == null) _overlay = new CursorOverlay();
             _overlay.Replay(doc, steps.Select(t => Tuple.Create(t.Item1.Name, t.Item1.Color, t.Item2, TargetsOf(doc.Database, t.Item2, MaxCapture))).ToList());
         }

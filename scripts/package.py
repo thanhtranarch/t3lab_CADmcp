@@ -5,7 +5,7 @@
 Zip layout, read by install.ps1 and by T3Lab's MCP Control (Connect installs it):
     T3LabCAD.bundle/PackageContents.xml
     T3LabCAD.bundle/Contents/<R24|R25|R26>/T3LabCAD.Loader.dll, T3LabCAD.Core.dll
-    T3LabCAD/bridge.py, T3LabCAD/tools_snapshot.json
+    T3LabCAD/bridge.py, T3LabCAD/tools_snapshot.json, T3LabCAD/register_mcp.py (Connect AI)
     manifest.json   {"name", "version", "series": {...}, "bundle", "bridge"}
 
 Standard library only.
@@ -44,6 +44,7 @@ def entries(configuration="Release"):
     if missing:
         raise SystemExit("Not built:\n  " + "\n  ".join(missing))
     out.append((os.path.join(ROOT, "bridge", "t3lab_cad_bridge.py"), "T3LabCAD/bridge.py"))
+    out.append((os.path.join(ROOT, "scripts", "register_mcp.py"), "T3LabCAD/register_mcp.py"))   # the ribbon's Connect AI runs it
     snapshot = os.path.join(ROOT, "bridge", "tools_snapshot.json")
     if os.path.isfile(snapshot):
         out.append((snapshot, "T3LabCAD/tools_snapshot.json"))
