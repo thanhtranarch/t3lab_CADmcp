@@ -1,4 +1,5 @@
-"""register_mcp.py against a fake home: register, idempotent re-run, check, remove; other entries kept.
+"""register_mcp.py against a fake home: register, idempotent re-run, check, remove; other entries kept;
+the old name t3lab-autocad replaced only where it runs our bridge.
 
     python -I tests/test_register.py
 """
@@ -31,9 +32,14 @@ def main():
     for d in (os.path.join(home, ".cursor"), os.path.join(home, ".codex"), os.path.join(appdata, "Claude"), os.path.join(appdata, "Code", "User")):
         os.makedirs(d)
     with open(os.path.join(home, ".codex", "config.toml"), "w") as f:
-        f.write('[model]\nname = "x"\n\n[mcp_servers.other]\ncommand = "a"\n')
+        f.write('[model]\nname = "x"\n\n[mcp_servers.t3lab-autocad]\ncommand = "py"\nargs = ["-I", "C:/Users/u/AppData/Roaming/T3LabCAD/bridge.py"]\n'
+                '\n[mcp_servers.other]\ncommand = "a"\n')
     with open(os.path.join(appdata, "Claude", "claude_desktop_config.json"), "w") as f:
-        json.dump({"mcpServers": {"t3lab-revit": {"command": "py"}}, "theme": "dark"}, f)
+        json.dump({"mcpServers": {"t3lab-revit": {"command": "py"},
+                                  "t3lab-autocad": {"command": "py", "args": ["-I", "C:\\Users\\u\\AppData\\Roaming\\T3LabCAD\\bridge.py"]}},
+                   "theme": "dark"}, f)
+    with open(os.path.join(home, ".cursor", "mcp.json"), "w") as f:      # same old name, someone else's server: kept
+        json.dump({"mcpServers": {"t3lab-autocad": {"command": "node", "args": ["their-server.js"]}}}, f)
     # no claude CLI on PATH, so Claude Code is skipped (not found) in "all" mode
     env = {"HOME": home, "USERPROFILE": home, "APPDATA": appdata, "LOCALAPPDATA": os.path.join(t, "local"), "PATH": os.path.dirname(sys.executable)}
     args = ["--bridge", "C:\\Users\\u\\AppData\\Roaming\\T3LabCAD\\bridge.py", "--python", "C:\\Py\\python.exe"]
@@ -44,11 +50,16 @@ def main():
     check("register: 4 clients", got == {"claude-desktop": "registered", "codex": "registered", "cursor": "registered", "vscode": "registered"}, got)
     claude = json.load(open(os.path.join(appdata, "Claude", "claude_desktop_config.json")))
     check("claude: other server + settings kept", "t3lab-revit" in claude["mcpServers"] and claude["theme"] == "dark", claude)
-    check("claude: entry", claude["mcpServers"]["t3lab-autocad"] == {"command": "C:\\Py\\python.exe", "args": ["-I", "C:/Users/u/AppData/Roaming/T3LabCAD/bridge.py"]}, claude)
+    check("claude: entry", claude["mcpServers"]["t3lab-cad-mcp"] == {"command": "C:\\Py\\python.exe", "args": ["-I", "C:/Users/u/AppData/Roaming/T3LabCAD/bridge.py"]}, claude)
     vs = json.load(open(os.path.join(appdata, "Code", "User", "mcp.json")))
-    check("vscode: servers + type stdio", vs["servers"]["t3lab-autocad"]["type"] == "stdio", vs)
+    check("vscode: servers + type stdio", vs["servers"]["t3lab-cad-mcp"]["type"] == "stdio", vs)
     toml = open(os.path.join(home, ".codex", "config.toml")).read()
-    check("codex: table added, others kept", "[mcp_servers.t3lab-autocad]" in toml and "[mcp_servers.other]" in toml and 'name = "x"' in toml, toml)
+    check("codex: table added, others kept", "[mcp_servers.t3lab-cad-mcp]" in toml and "[mcp_servers.other]" in toml and 'name = "x"' in toml, toml)
+    check("old name t3lab-autocad replaced where it runs our bridge", "t3lab-autocad" not in claude["mcpServers"]
+          and "[mcp_servers.t3lab-autocad]" not in toml and "T3LabCAD/bridge.py\"]\n\n" not in toml, (claude, toml))
+    cursor = json.load(open(os.path.join(home, ".cursor", "mcp.json")))
+    check("old name kept where it is someone else's server", cursor["mcpServers"]["t3lab-autocad"]["command"] == "node"
+          and "t3lab-cad-mcp" in cursor["mcpServers"], cursor)
     check("backups written", any(n.startswith("config.toml.bak-") for n in os.listdir(os.path.join(home, ".codex"))))
 
     code, out = run(env, *args)
@@ -58,9 +69,9 @@ def main():
     code, out = run(env, "--remove")
     check("remove: all removed", all(r["status"] == "removed" for r in out["results"]), out)
     toml = open(os.path.join(home, ".codex", "config.toml")).read()
-    check("codex: only ours removed", "t3lab-autocad" not in toml and "[mcp_servers.other]" in toml, toml)
+    check("codex: only ours removed", "t3lab-cad-mcp" not in toml and "[mcp_servers.other]" in toml, toml)
     claude = json.load(open(os.path.join(appdata, "Claude", "claude_desktop_config.json")))
-    check("claude: only ours removed", "t3lab-autocad" not in claude["mcpServers"] and "t3lab-revit" in claude["mcpServers"], claude)
+    check("claude: only ours removed", "t3lab-cad-mcp" not in claude["mcpServers"] and "t3lab-revit" in claude["mcpServers"], claude)
 
     with open(os.path.join(home, ".cursor", "mcp.json"), "w") as f:
         f.write('{ // a comment\n "mcpServers": {} }')

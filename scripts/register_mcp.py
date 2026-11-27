@@ -1,4 +1,4 @@
-"""Add (or update / remove / check) the t3lab-autocad server in every MCP client found on this PC.
+"""Add (or update / remove / check) the t3lab-cad-mcp server in every MCP client found on this PC.
 
     python -I register_mcp.py --bridge <bridge.py> --python <python.exe> [--clients all|a,b] [--check] [--remove] [--dry-run] [--force]
 
@@ -20,7 +20,11 @@ import subprocess
 import sys
 import time
 
-NAME = "t3lab-autocad"
+NAME = "t3lab-cad-mcp"
+# Earlier names of this server (2026-11-27: t3lab-autocad). Register / remove also drop such an entry, but only when
+# it runs our bridge (text in OURS), never a server of someone else that happens to share the name.
+LEGACY = ("t3lab-autocad",)
+OURS = ("t3labcad", "t3lab_cad_bridge")
 CLAUDE_RUNNING = 3
 HOME = os.path.expanduser("~")
 APPDATA = os.environ.get("APPDATA") or os.path.join(HOME, "AppData", "Roaming")
@@ -141,6 +145,16 @@ def same(old, new):
     return isinstance(old, dict) and old.get("command") == new["command"] and old.get("args") == new["args"]
 
 
+def ours(text):
+    text = (text if isinstance(text, str) else json.dumps(text)).lower()
+    return any(m in text for m in OURS)
+
+
+def legacy_json(servers):
+    """Old names of this server in a JSON config that still run our bridge."""
+    return [n for n in LEGACY if isinstance(servers, dict) and n in servers and ours(servers[n])]
+
+
 # --------------------------------------------------------------------------- one client
 
 def do_json(key, label, path, top, new, mode, dry, backed_up):
@@ -158,46 +172,63 @@ def do_json(key, label, path, top, new, mode, dry, backed_up):
     if mode == "check":
         cur = servers.get(NAME) if isinstance(servers, dict) else None
         return ("registered", json.dumps(cur)) if cur else ("not_registered", "")
+    old = legacy_json(servers)
     if mode == "remove":
-        if not isinstance(servers, dict) or NAME not in servers:
+        if not isinstance(servers, dict) or (NAME not in servers and not old):
             return "unchanged", "not registered"
         if dry:
             return "would_remove", ""
-        del servers[NAME]
+        for n in [NAME] + old:
+            servers.pop(n, None)
         write_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n", backed_up)
         return "removed", ""
     if not isinstance(servers, dict):
         servers = data[top] = {}
-    if same(servers.get(NAME), new):
+    if same(servers.get(NAME), new) and not old:
         return "unchanged", "already registered"
     if dry:
         return "would_register", json.dumps(new)
     servers[NAME] = new
+    for n in old:
+        del servers[n]
     write_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n", backed_up)
-    return "registered", ""
+    return "registered", ("replaces " + ", ".join(old)) if old else ""
 
 
 def toml_quote(v):
     return v.replace("\\", "\\\\").replace('"', '\\"')
 
 
-SECTION = re.compile(r"^\s*\[\s*mcp_servers\.(?:\"" + re.escape(NAME) + r"\"|" + re.escape(NAME) + r")(?:\.[^\]]*)?\s*\]\s*$")
+def section_re(name):
+    """[mcp_servers.<name>] and its sub-tables ([mcp_servers.<name>.env])."""
+    return re.compile(r"^\s*\[\s*mcp_servers\.(?:\"" + re.escape(name) + r"\"|" + re.escape(name) + r")(?:\.[^\]]*)?\s*\]\s*$")
+
+
+SECTION = section_re(NAME)
 HEADER = re.compile(r"^\s*\[")
 
 
-def toml_strip(text):
-    out, skip = [], False
+def toml_split(text, names):
+    """(text without the tables of `names`, the removed lines)."""
+    sections = [section_re(n) for n in names]
+    out, removed, skip = [], [], False
     for line in text.splitlines():
-        if SECTION.match(line):
+        if any(s.match(line) for s in sections):
             skip = True
-            continue
-        if skip and HEADER.match(line):
+        elif skip and HEADER.match(line):
             skip = False
-        if not skip:
-            out.append(line)
+        (removed if skip else out).append(line)
     while out and not out[-1].strip():
         out.pop()
-    return "\n".join(out)
+    return "\n".join(out), removed
+
+
+def toml_strip(text, names):
+    return toml_split(text, names)[0]
+
+
+def legacy_toml(text):
+    return [n for n in LEGACY if ours("\n".join(toml_split(text, [n])[1]))]
 
 
 def do_codex(path, python, bridge, mode, dry, backed_up):
@@ -205,16 +236,17 @@ def do_codex(path, python, bridge, mode, dry, backed_up):
     has = any(SECTION.match(l) for l in text.splitlines())
     if mode == "check":
         return ("registered", "") if has else ("not_registered", "")
+    old = legacy_toml(text)
     if mode == "remove":
-        if not has:
+        if not has and not old:
             return "unchanged", "not registered"
         if dry:
             return "would_remove", ""
-        write_text(path, toml_strip(text) + "\n", backed_up)
+        write_text(path, toml_strip(text, [NAME] + old) + "\n", backed_up)
         return "removed", ""
     block = ("[mcp_servers.{}]\ncommand = \"{}\"\nargs = [\"-I\", \"{}\"]\nstartup_timeout_sec = 60\n"
              .format(NAME, toml_quote(python), toml_quote(bridge)))
-    base = toml_strip(text)
+    base = toml_strip(text, [NAME] + old)
     new_text = (base + "\n\n" if base.strip() else "") + block
     if new_text.strip() == text.strip():
         return "unchanged", "already registered"
@@ -231,6 +263,10 @@ def do_claude_code(python, bridge, mode, dry, backed_up):
         if dry:
             return ("would_remove" if mode == "remove" else "would_register"), exe
         subprocess.run([exe, "mcp", "remove", "--scope", "user", NAME], capture_output=True, text=True, timeout=60)
+        for n in LEGACY:
+            got = subprocess.run([exe, "mcp", "get", n], capture_output=True, text=True, timeout=60)
+            if got.returncode == 0 and ours(got.stdout or ""):
+                subprocess.run([exe, "mcp", "remove", "--scope", "user", n], capture_output=True, text=True, timeout=60)
         if mode == "remove":
             return "removed", ""
         r = subprocess.run([exe, "mcp", "add", "--scope", "user", NAME, "--", python, "-I", bridge],

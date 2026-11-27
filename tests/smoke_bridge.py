@@ -67,7 +67,7 @@ def main():
     # 1. no AutoCAD
     c = Client(env)
     r = c.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "smoke", "version": "0"}})
-    check("initialize", r["result"]["serverInfo"]["name"] == "t3lab-autocad" and r["result"]["protocolVersion"] == "2025-06-18", r)
+    check("initialize", r["result"]["serverInfo"]["name"] == "t3lab-cad-mcp" and r["result"]["protocolVersion"] == "2025-06-18", r)
     c.notify("notifications/initialized")
     check("ping", c.request("ping")["result"] == {})
     tools = [t["name"] for t in c.request("tools/list")["result"]["tools"]]

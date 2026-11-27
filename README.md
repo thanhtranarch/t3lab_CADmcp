@@ -47,7 +47,7 @@ Script sẽ:
 1. Build 2 project cho từng series R24, R25, R26 (`-Series R26` để chỉ build một series).
 2. Copy bundle vào `%APPDATA%\Autodesk\ApplicationPlugins\T3LabCAD.bundle` (vị trí trusted, AutoCAD tự load khi khởi động).
 3. Copy bridge vào `%APPDATA%\T3LabCAD\bridge.py`.
-4. Thêm server `t3lab-autocad` vào `claude_desktop_config.json` (có backup) bằng `register_mcp.py` (copy vào `%APPDATA%\T3LabCAD`). Thêm `-ClaudeCode` để đăng ký cho Claude Code CLI. AI app khác: nút **Connect AI** trong AutoCAD.
+4. Thêm server `t3lab-cad-mcp` vào `claude_desktop_config.json` (có backup) bằng `register_mcp.py` (copy vào `%APPDATA%\T3LabCAD`). Thêm `-ClaudeCode` để đăng ký cho Claude Code CLI. AI app khác: nút **Connect AI** trong AutoCAD.
 
 Sau đó **khởi động lại Claude Desktop**. Trong AutoCAD gõ `T3MCPSTATUS` (hoặc nút **Status**) để kiểm tra — cùng các dòng với Status của T3Lab Revit MCP:
 
@@ -217,7 +217,7 @@ Cùng đường đi với MCP (tier, audit, hàng đợi, Agent Cursors ghi "cli
 
 AutoCAD chỉ chạy một lời gọi một lúc. Add-in xếp hàng công bằng (`Conductor.cs`): người đang chat trước bot, rồi xoay vòng theo từng agent (một agent gọi dồn dập không chặn agent khác). Lời gọi chờ quá hạn (`queue_wait_s`, mặc định 45 s) thì **không chạy** và trả về `{"error_code": "autocad_busy", "nothing_ran": true, "retry_after_s": …, "running": {...}}`, nên không có thay đổi nào xảy ra sau khi AI đã bỏ cuộc. `cancel_command` và `t3lab_narrate` không phải xếp hàng. `T3MCPSTATUS` và `health` cho thấy ai đang giữ AutoCAD và bao nhiêu lời gọi đang chờ.
 
-Tuỳ chọn thêm vào `args` của server `t3lab-autocad` trong config AI app (hoặc biến môi trường; tiền tố `T3LABCAD_` riêng, nên biến `T3LAB_*` của T3Lab pyRevit không ảnh hưởng tới add-in này):
+Tuỳ chọn thêm vào `args` của server `t3lab-cad-mcp` trong config AI app (hoặc biến môi trường; tiền tố `T3LABCAD_` riêng, nên biến `T3LAB_*` của T3Lab pyRevit không ảnh hưởng tới add-in này):
 
 | Tuỳ chọn | Biến | Việc |
 |---|---|---|
@@ -232,7 +232,7 @@ Lỗi có `error_code` là JSON `{error_code, message, retryable, nothing_ran, h
 
 ## Chạy cùng T3Lab (pyRevit extension)
 
-MCP Control › Connect của T3Lab (t3lab-revit-api) cài **chính gói này** (`T3LabCAD.zip` của release mới nhất) và ghi cùng một entry `t3lab-autocad` = `python -I %APPDATA%\T3LabCAD\bridge.py`, giống Connect AI ở đây, nên ai ghi sau cũng đúng. Giữ được vì:
+MCP Control › Connect của T3Lab (t3lab-revit-api) cài **chính gói này** (`T3LabCAD.zip` của release mới nhất) và ghi cùng một entry `t3lab-cad-mcp` = `python -I %APPDATA%\T3LabCAD\bridge.py`, giống Connect AI ở đây, nên ai ghi sau cũng đúng. Tên cũ `t3lab-autocad` (trước 1.5.0) được cả hai bên thay khi Connect lại, chỉ khi entry đó chạy bridge này. Giữ được vì:
 
 | Hợp đồng | Ở đâu |
 |---|---|
@@ -339,7 +339,7 @@ Log: `%APPDATA%\T3LabCAD\logs\t3labcad.log`.
 
 | Version | Nội dung |
 |---|---|
-| 1.5.0 | Nhiều bản vẽ cùng lúc: `autocad_document` cho 34 tool (bản vẽ mở khác hoặc mở trên nền), `open_document background=true`, lưu / đóng bằng `document=`; `check_tool_scopes.py`. Dòng lệnh: `bridge.py status / tools / help / call / cursors / reload / connect / verify`; tool `agent_cursors`. Đồng bộ với T3Lab Revit MCP: cùng ribbon (Start / Stop · Agent Cursors · Connect AI · Status / Reload, icon T3 Space Line), cùng bảng Agent Cursors (bố cục, chữ, màu `T3Style`, nút Pause · Select changes · Replay · Clear, Show on drawing · Follow), cùng dòng Status. Mới: `T3MCP` (Start / Stop, tắt thì giữ tắt), `T3MCPCONNECT` (Connect AI cho 8 AI app, `register_mcp.py` mới). Ribbon: panel **T3Lab MCP** nằm trong tab **Add-ins** của AutoCAD, không còn tab "T3Lab" riêng. Hàng đợi công bằng cho nhiều AI (`Conductor.cs`, `autocad_busy` thay vì chạy muộn), lỗi dạng JSON có `error_code`. Bridge 1.1.0: `--tier` / `--deny` / `--agent` / `--lane` / `--queue-wait`, nhật ký audit, mỗi chat một agent. Agent Cursors: trạng thái in line / waiting for AutoCAD / thinking / last step ago, tag pastel ghi đối tượng ("Line 3450"), vẽ theo line / polyline / arc mới, con trỏ không đè nhau. |
+| 1.5.0 | Tên server **`t3lab-cad-mcp`** (cùng kiểu `t3lab-revit-mcp`; Connect AI thay entry cũ `t3lab-autocad`), biến môi trường `T3LABCAD_*`. Nhiều bản vẽ cùng lúc: `autocad_document` cho 34 tool (bản vẽ mở khác hoặc mở trên nền), `open_document background=true`, lưu / đóng bằng `document=`; `check_tool_scopes.py`. Dòng lệnh: `bridge.py status / tools / help / call / cursors / reload / connect / verify`; tool `agent_cursors`. Đồng bộ với T3Lab Revit MCP: cùng ribbon (Start / Stop · Agent Cursors · Connect AI · Status / Reload, icon T3 Space Line), cùng bảng Agent Cursors (bố cục, chữ, màu `T3Style`, nút Pause · Select changes · Replay · Clear, Show on drawing · Follow), cùng dòng Status. Mới: `T3MCP` (Start / Stop, tắt thì giữ tắt), `T3MCPCONNECT` (Connect AI cho 8 AI app, `register_mcp.py` mới). Ribbon: panel **T3Lab MCP** nằm trong tab **Add-ins** của AutoCAD, không còn tab "T3Lab" riêng. Hàng đợi công bằng cho nhiều AI (`Conductor.cs`, `autocad_busy` thay vì chạy muộn), lỗi dạng JSON có `error_code`. Bridge 1.1.0: `--tier` / `--deny` / `--agent` / `--lane` / `--queue-wait`, nhật ký audit, mỗi chat một agent. Agent Cursors: trạng thái in line / waiting for AutoCAD / thinking / last step ago, tag pastel ghi đối tượng ("Line 3450"), vẽ theo line / polyline / arc mới, con trỏ không đè nhau. |
 | 1.4.0 | 55 → 65 tool. `edit_geometry` thêm extend, trim, break, fillet, chamfer. `space: "block:TÊN"` sửa định nghĩa block. `transform_entities` thêm align, array_rect, array_polar. Field trong text / mtext + `update_fields`. `set_page_setup`, `layer_state`, `attach_underlay`, `export_entities` (WBLOCK), `set_ucs`, `attach_point_cloud`, `civil_query`, `civil_points` (Civil 3D). **Agent Cursors**: bảng hoạt động + con trỏ AI trên bản vẽ (`T3CURSORS`), `t3lab_narrate`. |
 | 1.3.0 | 47 → 55 tool. `measure`, `quantity_takeoff`, `extract_block_data` (CSV), `replace_text`, `edit_geometry` (offset, join, boundary), `sync_block_attributes`, `import_from_drawing`, `set_viewport`. `add_entities` thêm table, mleader, attdef, dim radius / diameter / angular / arc / ordinate / chain. `update_entities` thêm dynamic block property, đỉnh polyline, ô table, draw order. `query_entities` thêm length / area, lọc màu / linetype / closed, `totals`. |
 | 1.2.0 | 27 → 47 tool. File (`list_drawing_files`, `rename_document`, `delete_drawing_file`; `save_document` bản sao / bản cũ; `new_document save_as`), layout + viewport, text / dim style, linetype, `list_named_objects` / `rename_object` / `delete_object` / `purge`, group, named view, xref, `explode_entities`, `export_pdf`, `publish_pdf`. `scripts/gen_tools_snapshot.py` + kiểm tra trong CI. |

@@ -60,7 +60,7 @@ namespace T3LabCAD.Loader
             CoreHost.Write(Stopped);
         });
 
-        /// <summary>Connect AI (ribbon): the AI apps found on this PC get the t3lab-autocad server.</summary>
+        /// <summary>Connect AI (ribbon): the AI apps found on this PC get the t3lab-cad-mcp server.</summary>
         [CommandMethod("T3LAB", "T3MCPCONNECT", CommandFlags.Modal)]
         public void ConnectAi() => Guard(Connect.Run);
 

@@ -55,7 +55,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 BRIDGE_VERSION = "1.1.0"
-SERVER_NAME = "t3lab-autocad"
+SERVER_NAME = "t3lab-cad-mcp"
 
 PORT_MIN, PORT_MAX = 48900, 48908      # = T3LabCAD.Core Entry.PortMin/PortMax
 # Tests against tests/mock_autocad.py move the range: T3LABCAD_PORT_RANGE=49900-49902
@@ -166,7 +166,7 @@ class AcadError(Exception):
 
 
 def log(message):
-    sys.stderr.write("[t3lab-autocad] {}\n".format(message))
+    sys.stderr.write("[t3lab-cad-mcp] {}\n".format(message))
     sys.stderr.flush()
 
 
