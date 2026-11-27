@@ -14,7 +14,7 @@ namespace T3LabCAD.Loader
             catch (System.Exception ex) { CoreHost.Write("T3LabCAD: MCP server did not start: " + CoreHost.Unwrap(ex).Message); }
 
             try { T3Ribbon.Init(); }
-            catch (System.Exception ex) { CoreHost.Write("T3LabCAD: ribbon tab not created: " + ex.Message); }
+            catch (System.Exception ex) { CoreHost.Write("T3LabCAD: ribbon panel not created: " + ex.Message); }
         }
 
         public void Terminate()

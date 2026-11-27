@@ -8,7 +8,7 @@
                     ProductType="Application"
                     Name="T3Lab CAD MCP"
                     Description="MCP server inside AutoCAD: lets Claude read and edit the open drawing."
-                    AppVersion="1.4.0"
+                    AppVersion="1.5.0"
                     Author="T3Lab"
                     ProductCode="{CAFE7E02-09EC-491D-80C6-E1FC82276248}"
                     UpgradeCode="{D3291EDA-AF1C-460D-8934-1A18738D05EC}">
@@ -17,7 +17,7 @@
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.0" SeriesMax="R24.3" />
     <ComponentEntry AppName="T3LabCAD"
                     ModuleName="./Contents/R24/T3LabCAD.Loader.dll"
-                    AppDescription="T3Lab CAD MCP loader (starts the MCP server, T3Lab ribbon tab)"
+                    AppDescription="T3Lab CAD MCP loader (starts the MCP server, T3Lab MCP panel on the Add-ins tab)"
                     LoadOnAutoCADStartup="True">
       <Commands GroupName="T3LAB">
         <Command Local="T3MCPSTART" Global="T3MCPSTART" />
@@ -31,7 +31,7 @@
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R25.9" />
     <ComponentEntry AppName="T3LabCAD"
                     ModuleName="./Contents/R25/T3LabCAD.Loader.dll"
-                    AppDescription="T3Lab CAD MCP loader (starts the MCP server, T3Lab ribbon tab)"
+                    AppDescription="T3Lab CAD MCP loader (starts the MCP server, T3Lab MCP panel on the Add-ins tab)"
                     LoadOnAutoCADStartup="True">
       <Commands GroupName="T3LAB">
         <Command Local="T3MCPSTART" Global="T3MCPSTART" />
@@ -45,7 +45,7 @@
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R26.0" SeriesMax="R26.9" />
     <ComponentEntry AppName="T3LabCAD"
                     ModuleName="./Contents/R26/T3LabCAD.Loader.dll"
-                    AppDescription="T3Lab CAD MCP loader (starts the MCP server, T3Lab ribbon tab)"
+                    AppDescription="T3Lab CAD MCP loader (starts the MCP server, T3Lab MCP panel on the Add-ins tab)"
                     LoadOnAutoCADStartup="True">
       <Commands GroupName="T3LAB">
         <Command Local="T3MCPSTART" Global="T3MCPSTART" />

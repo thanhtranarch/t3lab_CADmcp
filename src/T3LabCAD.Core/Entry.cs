@@ -12,10 +12,12 @@ namespace T3LabCAD.Core
     /// </summary>
     public static class Entry
     {
-        public const string Version = "1.4.0";
+        public const string Version = "1.5.0";
         public const int PortMin = 48900, PortMax = 48908;
 
         internal static MainThread Main { get; private set; }
+        /// <summary>The one AutoCAD slot, shared fairly by every AI app (Conductor.cs).</summary>
+        internal static readonly Conductor Queue = new Conductor();
         internal static string ContentsDir { get; private set; }
         internal static string AcadVersion { get; private set; } = "";
         internal static volatile string ActiveDocument = "";
@@ -68,7 +70,9 @@ namespace T3LabCAD.Core
         {
             if (_server == null) return $"T3LabCAD MCP v{Version}: stopped (T3MCPSTART to start)";
             string last = string.IsNullOrEmpty(LastCall) ? "none" : LastCall;
-            return $"T3LabCAD MCP v{Version}: listening on 127.0.0.1:{_server.Port} | {Registry.Count} tools | {CallCount} calls | last: {last}";
+            var q = Queue.Status();
+            string queue = (bool)q["busy"] ? $"busy ({q["tool"]}), {q["waiting"]} waiting" : "free";
+            return $"T3LabCAD MCP v{Version}: listening on 127.0.0.1:{_server.Port} | {Registry.Count} tools | {CallCount} calls | last: {last} | queue: {queue}";
         }
 
         internal static int Port => _server?.Port ?? 0;

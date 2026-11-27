@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using Autodesk.AutoCAD.ApplicationServices;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
@@ -30,7 +31,10 @@ namespace T3LabCAD.Core
                 {
                     case "health": result = Health(); break;
                     case "tools/list": result = Registry.ListJson(); break;
-                    case "tools/call": result = CallTool(p.ReqStr("name"), new Args(p.Raw("arguments")), AgentCursors.ClientName(p.Raw("client"))); break;
+                    case "tools/call":
+                        result = CallTool(p.ReqStr("name"), new Args(p.Raw("arguments")), AgentCursors.ClientKey(p.Raw("client")),
+                            p.Str("lane"), p.Num("queue_wait_s", 0));
+                        break;
                     default: return Error(id, -32601, "Unknown method: " + method);
                 }
                 return Json.Write(new Dictionary<string, object> { ["id"] = id, ["result"] = result });
@@ -59,9 +63,23 @@ namespace T3LabCAD.Core
             ["autocad"] = Entry.AcadVersion,
             ["active_document"] = Entry.ActiveDocument,
             ["calls"] = Interlocked.Read(ref Entry.CallCount),
+            ["queue"] = QueueStatus(),
         };
 
-        static object CallTool(string name, Args args, string client)
+        /// <summary>Conductor status with display names ("Claude Code"), never the bridge session ids.</summary>
+        static Dictionary<string, object> QueueStatus()
+        {
+            Dictionary<string, object> q = Entry.Queue.Status();
+            if (q.TryGetValue("agent", out object a)) q["agent"] = AgentCursors.Label(a as string);
+            if (q.TryGetValue("waiting_agents", out object w) && w is List<object> list)
+                q["waiting_agents"] = list.Select(x => (object)AgentCursors.Label(x as string)).Distinct().ToList();
+            return q;
+        }
+
+        /// <summary>No deadline from the bridge (older bridge, direct client): a call waits at most this long for its turn.</summary>
+        const int DefaultQueueWaitMs = 60000, MaxQueueWaitMs = 30 * 60 * 1000;
+
+        static object CallTool(string name, Args args, string client, string lane, double queueWaitS)
         {
             ToolDef def = Registry.Get(name);
             if (def == null) return ErrorResult($"Unknown tool '{name}'.");
@@ -73,9 +91,12 @@ namespace T3LabCAD.Core
             AgentStep step = null;
             try { step = AgentCursors.Begin(def, args, client); }
             catch (Exception ex) { Log.Error("agent cursors: " + ex.Message); }
-            bool ok = false, refused = false;
+            bool ok = false, refused = false, busy = false;
             string error = null;
             object value = null;
+            int deadlineMs = queueWaitS > 0 ? (int)Math.Min(queueWaitS * 1000, MaxQueueWaitMs) : DefaultQueueWaitMs;
+            // one call at a time, in a fair order (Conductor); t3lab_narrate and cancel_command never wait in line
+            Conductor.Ticket ticket = null;
             try
             {
                 if (AgentCursors.Blocks(def, args))
@@ -84,6 +105,12 @@ namespace T3LabCAD.Core
                     throw new ToolError(AgentCursors.PausedMessage);
                 }
                 bool capture = step != null && AgentCursors.Captures(def);
+                if (def.Name != AgentCursors.NarrateTool && !def.DuringCommand)
+                {
+                    ticket = Entry.Queue.Enter(client, name, lane, deadlineMs, (ahead, running) => AgentCursors.Queued(step, ahead, running));
+                    AgentCursors.Granted(step);
+                    if (def.Background) { ticket.MarkRunning(); AgentCursors.OnMain(step); }
+                }
                 if (def.Background)
                 {
                     AgentCursors.Capture watch = capture ? OnMainOrNull(() => StartCapture(step)) : null;
@@ -92,8 +119,13 @@ namespace T3LabCAD.Core
                 }
                 else
                 {
-                    value = Entry.Main.Run(() =>
+                    MainThread main = Entry.Main ?? throw new ToolError("The T3LabCAD server is stopping. Nothing was run; retry in a moment.");
+                    // AutoCAD must start it within what is left of the deadline, or it never runs (no late "ghost write")
+                    int startMs = Math.Max(5000, deadlineMs - (int)sw.ElapsedMilliseconds);
+                    value = main.Run(() =>
                     {
+                        ticket?.MarkRunning();
+                        AgentCursors.OnMain(step);
                         // Pause pressed while this call waited for the main thread
                         if (AgentCursors.Blocks(def, args))
                         {
@@ -108,10 +140,39 @@ namespace T3LabCAD.Core
                         }
                         try { return Execute(def, args); }
                         finally { watch?.Dispose(); }
-                    }, applicationContext: def.Kind == ToolKind.App);
+                    }, startMs, applicationContext: def.Kind == ToolKind.App);
                 }
                 ok = true;
                 return Success(value);
+            }
+            catch (Conductor.BusyException be)
+            {
+                busy = true;
+                outcome = "busy: " + be.Message;
+                error = "Not run, AutoCAD was busy: " + be.Message;
+                return BusyResult(be, deadlineMs / 1000.0);
+            }
+            catch (MainThread.NotStartedException ns) when (!def.Background)
+            {
+                busy = true;
+                outcome = "not started: " + ns.Message;
+                error = ns.Message;
+                return Coded("autocad_busy", ns.Message, true,
+                    "Ask the user to close the dialog or finish what is open in AutoCAD, then retry.", 10);
+            }
+            catch (MainThread.NotStartedException ns)
+            {
+                // a background tool (run_command) may have done part of its work already: no nothing_ran claim
+                outcome = "not started: " + ns.Message;
+                error = ns.Message;
+                return ErrorResult(ns.Message);
+            }
+            catch (ToolError te) when (refused)
+            {
+                outcome = "paused";
+                error = te.Message;
+                return Coded("paused_by_user", te.Message, true,
+                    "Do read-only work meanwhile, or ask the user to press Resume on the T3Lab Agent Cursors bar (T3CURSORS).");
             }
             catch (ToolError te)
             {
@@ -135,11 +196,57 @@ namespace T3LabCAD.Core
             }
             finally
             {
+                ticket?.Dispose();
                 Entry.LastCall = $"{name} ({sw.ElapsedMilliseconds} ms)";
                 Log.Info($"{name} {sw.ElapsedMilliseconds}ms {outcome}");
-                try { AgentCursors.End(step, ok, refused, error, value); }
+                try { AgentCursors.End(step, ok, refused, busy, error, value); }
                 catch (Exception ex) { Log.Error("agent cursors: " + ex.Message); }
             }
+        }
+
+        /// <summary>A call that never got its turn: what holds AutoCAD, and when to try again. Nothing ran.</summary>
+        static object BusyResult(Conductor.BusyException be, double waitedS)
+        {
+            string who = be.Agent == null ? null : AgentCursors.Label(be.Agent);
+            string message = be.Agent == null
+                ? $"AutoCAD did not get to this call within {waitedS:0} s. Nothing was run."
+                : be.Started
+                    ? $"AutoCAD is busy with another AI call ({be.Tool} for {who}, {be.RunningS:0} s so far). Nothing was run."
+                    : $"AutoCAD has not started the call ahead of this one ({be.Tool} for {who}): a modal dialog or a long " +
+                      "operation may be blocking AutoCAD. Nothing was run.";
+            var d = new Dictionary<string, object>
+            {
+                ["error_code"] = "autocad_busy",
+                ["message"] = message,
+                ["retryable"] = true,
+                ["nothing_ran"] = true,
+                ["retry_after_s"] = Math.Max(5, Math.Min(30, 5 + be.Ahead * 5)),
+                ["ahead"] = be.Ahead,
+                ["hint"] = be.Started || be.Agent == null
+                    ? "Do work that does not need AutoCAD meanwhile (plan, read results you have), then retry after retry_after_s."
+                    : "Ask the user to close the dialog or finish what is open in AutoCAD, then retry.",
+            };
+            if (be.Agent != null)
+                d["running"] = new Dictionary<string, object>
+                {
+                    ["agent"] = who, ["tool"] = be.Tool, ["running_s"] = be.RunningS, ["state"] = be.Started ? "running" : "waiting_for_autocad",
+                };
+            return ErrorResult(Json.Write(d));
+        }
+
+        /// <summary>A refusal an agent can act on: {error_code, message, retryable, nothing_ran, hint}.</summary>
+        static object Coded(string code, string message, bool retryable, string hint, int retryAfterS = 0)
+        {
+            var d = new Dictionary<string, object>
+            {
+                ["error_code"] = code,
+                ["message"] = message,
+                ["retryable"] = retryable,
+                ["nothing_ran"] = true,
+                ["hint"] = hint,
+            };
+            if (retryAfterS > 0) d["retry_after_s"] = retryAfterS;
+            return ErrorResult(Json.Write(d));
         }
 
         /// <summary>Agent Cursors set-up for a background tool: on the main thread, but never fails or delays the call much.</summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -9,11 +10,27 @@ using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
 namespace T3LabCAD.Loader
 {
-    /// <summary>"T3Lab" ribbon tab with an "MCP Server" panel (Start / Stop / Status / Reload).</summary>
+    /// <summary>
+    /// Panel "T3Lab MCP" (Start / Stop / Status / Reload / Agent Cursors) on AutoCAD's own Add-ins tab (owner's request,
+    /// 2026-11-27: no tab of our own). The tab's id is not documented (CUIx ids may carry a menu-group prefix such as
+    /// "ACAD."), so it is found by the end of its id, then by title. A timer keeps looking for WatchS after start or a
+    /// workspace switch: CUIx tabs can arrive after the ribbon. Only when none has appeared after RetryS does the panel go
+    /// on a stand-in tab titled "Add-ins", and it moves to the real tab if that shows up while the timer still runs.
+    /// </summary>
     internal static class T3Ribbon
     {
-        const string TabId = "T3LAB_CAD_MCP_TAB";
-        static bool _hooked;
+        const string PanelId = "T3LAB_CAD_MCP_PANEL", FallbackTabId = "T3LAB_CAD_ADDINS_FALLBACK", OldTabId = "T3LAB_CAD_MCP_TAB";
+        const double RetryS = 15, WatchS = 120;
+        static readonly string[] AddinsIds = { "ID_TabAddins", "ID_TabAddIns", "ID_ADDINSTAB", "ID_TabPlugins" };
+        static readonly string[] AddinsIdParts = { "tabaddins", "tabplugins", "addinstab", "pluginstab" };
+        static readonly string[] AddinsTitles =
+        {
+            "Add-ins", "Add-Ins", "Plug-ins", "Zusatzmodule", "Complementos", "Compléments", "Componenti aggiuntivi", "Doplňky",
+            "Dodatki", "Kiegészítők", "Надстройки", "附加模块", "增益集", "アドイン", "애드인",
+        };
+        static bool _hooked, _reported;
+        static DateTime _firstTry;
+        static System.Windows.Threading.DispatcherTimer _watch;
 
         internal static void Init()
         {
@@ -32,6 +49,17 @@ namespace T3LabCAD.Loader
             Build();
         }
 
+        /// <summary>AutoCAD's Add-ins tab: an id ending in a known one, else its title, else an id that says add-ins.</summary>
+        static RibbonTab FindAddins(RibbonControl ribbon)
+        {
+            var tabs = ribbon.Tabs.Where(t => t != null && t.Id != FallbackTabId && t.Id != OldTabId).ToList();
+            return tabs.FirstOrDefault(t => AddinsIds.Any(id => (t.Id ?? "").EndsWith(id, StringComparison.OrdinalIgnoreCase)))
+                ?? tabs.FirstOrDefault(t => AddinsTitles.Any(n => string.Equals((t.Title ?? "").Trim(), n, StringComparison.OrdinalIgnoreCase)))
+                ?? tabs.FirstOrDefault(t => AddinsIdParts.Any(part => (t.Id ?? "").IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0));
+        }
+
+        static bool HasPanel(RibbonTab tab) => tab.Panels.Any(p => p?.Source?.Id == PanelId);
+
         static void Build()
         {
             if (!_hooked)
@@ -39,26 +67,95 @@ namespace T3LabCAD.Loader
                 _hooked = true;
                 AcApp.SystemVariableChanged += (s, e) =>
                 {
-                    // Switching workspace rebuilds the ribbon and drops custom tabs.
-                    if (string.Equals(e.Name, "WSCURRENT", StringComparison.OrdinalIgnoreCase)) Build();
-                    else if (string.Equals(e.Name, "COLORTHEME", StringComparison.OrdinalIgnoreCase)) Repaint();
+                    try
+                    {
+                        // Switching workspace rebuilds the ribbon and drops panels added at run time.
+                        if (string.Equals(e.Name, "WSCURRENT", StringComparison.OrdinalIgnoreCase)) { _firstTry = default; Build(); }
+                        else if (string.Equals(e.Name, "COLORTHEME", StringComparison.OrdinalIgnoreCase)) Repaint();
+                    }
+                    catch (Exception ex) { CoreHost.Write("T3LabCAD: ribbon panel not updated: " + ex.Message); }
                 };
             }
 
             RibbonControl ribbon = ComponentManager.Ribbon;
-            if (ribbon == null || ribbon.FindTab(TabId) != null) return;
+            if (ribbon == null) return;
+            DateTime now = DateTime.Now;
+            if (_firstTry == default)
+            {
+                _firstTry = now;
+                Watch();
+            }
+
+            RemoveTab(ribbon, OldTabId);   // the "T3Lab" tab of 1.4 and earlier (a Core reload never left one, a Loader update can)
+            RibbonTab tab = FindAddins(ribbon);
+            if (tab == null)
+            {
+                if ((now - _firstTry).TotalSeconds < RetryS) return;   // the timer looks again
+                tab = ribbon.FindTab(FallbackTabId);
+                if (tab == null)
+                {
+                    tab = new RibbonTab { Title = "Add-ins", Id = FallbackTabId };
+                    ribbon.Tabs.Add(tab);
+                    if (!_reported)
+                    {
+                        _reported = true;
+                        CoreHost.Write("T3LabCAD: this workspace has no Add-ins ribbon tab; the T3Lab MCP panel is on a tab named Add-ins of its own.");
+                    }
+                }
+            }
+            else if (ribbon.FindTab(FallbackTabId) != null)
+            {
+                RemoveTab(ribbon, FallbackTabId);   // the real tab is here now
+            }
+            if (HasPanel(tab)) return;
 
             Buttons.Clear();
-            var source = new RibbonPanelSource { Title = "MCP Server" };
+            var source = new RibbonPanelSource { Title = "T3Lab MCP", Id = PanelId };
             source.Items.Add(Button("Start", "T3MCPSTART", "Start the MCP server so Claude can connect", "start"));
             source.Items.Add(Button("Stop", "T3MCPSTOP", "Stop the MCP server", "stop"));
-            source.Items.Add(Button("Status", "T3MCPSTATUS", "Show port, tool count and last call", "status"));
+            source.Items.Add(Button("Status", "T3MCPSTATUS", "Show port, tool count, the call queue and the last call", "status"));
             source.Items.Add(Button("Reload", "T3MCPRELOAD", "Reload T3LabCAD.Core.dll after installing a new build", "reload"));
             source.Items.Add(Button("Agent\nCursors", "T3CURSORS", "Show what AI apps do in AutoCAD: a bar with each app, its goal and steps, and pointers on the drawing", "cursors"));
-
-            var tab = new RibbonTab { Title = "T3Lab", Id = TabId };
             tab.Panels.Add(new RibbonPanel { Source = source });
-            ribbon.Tabs.Add(tab);
+        }
+
+        static void RemoveTab(RibbonControl ribbon, string id)
+        {
+            try
+            {
+                RibbonTab old = ribbon.FindTab(id);
+                if (old != null) ribbon.Tabs.Remove(old);
+            }
+            catch (Exception) { /* the ribbon is being rebuilt */ }
+        }
+
+        /// <summary>
+        /// Look again every second until WatchS has passed (a timer on the main thread's dispatcher: AutoCAD's Idle event
+        /// may not come again while nobody touches AutoCAD). Stops early once the panel is on the real Add-ins tab.
+        /// </summary>
+        static void Watch()
+        {
+            if (_watch == null)
+            {
+                _watch = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                _watch.Tick += (s, e) =>
+                {
+                    try
+                    {
+                        RibbonControl ribbon = ComponentManager.Ribbon;
+                        RibbonTab real = ribbon == null ? null : FindAddins(ribbon);
+                        bool settled = real != null && HasPanel(real) && ribbon.FindTab(FallbackTabId) == null;
+                        if (settled || (DateTime.Now - _firstTry).TotalSeconds > WatchS) _watch.Stop();
+                        else Build();
+                    }
+                    catch (Exception ex)
+                    {
+                        _watch.Stop();
+                        CoreHost.Write("T3LabCAD: ribbon panel not created: " + ex.Message);
+                    }
+                };
+            }
+            _watch.Start();
         }
 
         static readonly List<KeyValuePair<RibbonButton, string>> Buttons = new List<KeyValuePair<RibbonButton, string>>();

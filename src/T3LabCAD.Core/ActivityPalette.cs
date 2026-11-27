@@ -139,7 +139,16 @@ namespace T3LabCAD.Core
             Controls.Add(_canvas);
             Controls.Add(_buttons);
             _canvas.Paint += PaintCanvas;
-            _tick.Tick += (s, e) => { if (_model.Agents.Any(a => a.Working) || _model.Feed.Count > 0) _canvas.Invalidate(); };
+            _tick.Tick += (s, e) =>
+            {
+                // the seconds count, "in line" -> "waiting for AutoCAD", thinking -> idle: a fresh snapshot (main thread)
+                if (_model.Agents.Any(a => a.Working || a.State == AgentCursors.AgentState.Thinking))
+                {
+                    try { SetView(AgentCursors.Snapshot()); }
+                    catch (Exception ex) { Log.Error("agent cursors snapshot: " + ex.Message); }
+                }
+                else if (_model.Feed.Count > 0) _canvas.Invalidate();
+            };
             _tick.Start();
             ApplyTheme();
         }
@@ -220,6 +229,10 @@ namespace T3LabCAD.Core
             return when.ToString("HH:mm");
         }
 
+        static string Dots() => new string('·', 1 + (int)(DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond / 1000 % 3));
+
+        static readonly Color Amber = Color.FromArgb(0xE0, 0x8E, 0x00);
+
         // ---------------------------------------------------------------- drawing
 
         void PaintCanvas(object sender, PaintEventArgs e)
@@ -241,11 +254,22 @@ namespace T3LabCAD.Core
                 // name row: pointer in the app's colour, name, status
                 Pointer(g, agent.Color, x, y + 1);
                 g.DrawString(agent.Name, _bold, B(_fore), x + 16, y);
-                string status = agent.Status == "Working" ? $"Working {(int)(agent.NowSeconds + since)} s" : agent.Status;
-                Color statusColor = agent.Status == "Paused" ? Color.FromArgb(0xE0, 0x8E, 0x00) : agent.Working ? ActivityView.ActionColor(agent.NowAction) : _muted;
+                int secs = (int)(agent.NowSeconds + since);
+                string status;
+                switch (agent.State)
+                {
+                    case AgentCursors.AgentState.Working: status = $"Working {secs} s"; break;
+                    case AgentCursors.AgentState.Blocked: status = $"Waiting for AutoCAD {secs} s"; break;
+                    case AgentCursors.AgentState.Thinking: status = "Thinking" + Dots(); break;
+                    case AgentCursors.AgentState.Idle: status = agent.LastEnd.HasValue ? "Idle · last step " + Ago(agent.LastEnd.Value) : "Idle"; break;
+                    default: status = agent.Status; break;
+                }
+                bool waits = agent.State == AgentCursors.AgentState.Queued || agent.State == AgentCursors.AgentState.Blocked;
+                Color statusColor = agent.State == AgentCursors.AgentState.Paused || waits ? Amber
+                    : agent.State == AgentCursors.AgentState.Working ? ActivityView.ActionColor(agent.NowAction) : _muted;
                 SizeF ss = g.MeasureString(status, _small);
                 float sx = x + inner - ss.Width;
-                if (agent.Working)
+                if (agent.State == AgentCursors.AgentState.Working)
                 {
                     int pulse = 3 + (int)((DateTime.Now.Millisecond / 250) % 2);
                     g.FillEllipse(B(statusColor), sx - 10, y + 5, pulse * 2, pulse * 2);
@@ -276,14 +300,22 @@ namespace T3LabCAD.Core
                 }
                 if (agent.Working && agent.Now != null)
                 {
-                    // what runs now: a block in the action's colour
-                    Color ac = ActivityView.ActionColor(agent.NowAction);
+                    // what runs now: a block in the action's colour; amber while it waits its turn or for AutoCAD
+                    Color ac = waits ? Amber : ActivityView.ActionColor(agent.NowAction);
+                    string head = agent.State == AgentCursors.AgentState.Queued
+                        ? "IN LINE · " + (agent.Behind != null ? "after " + agent.Behind : "waiting its turn") + (agent.Ahead > 0 ? $", {agent.Ahead} more ahead" : "")
+                        : agent.State == AgentCursors.AgentState.Blocked ? "WAITING · AutoCAD is busy (a dialog or a long operation)"
+                        : agent.NowAction.ToString().ToUpperInvariant();
                     var block = new Rectangle(x, y + 2, inner, 34);
                     g.FillRectangle(B(Color.FromArgb(40, ac)), block);
                     g.FillRectangle(B(ac), x, y + 2, 4, 34);
-                    g.DrawString(agent.NowAction.ToString().ToUpperInvariant(), _small, B(ac), x + 10, y + 4);
-                    g.DrawString(agent.Now, _bold, B(_fore), new RectangleF(x + 10, y + 17, inner - 14, 16));
+                    g.DrawString(head, _small, B(ac), new RectangleF(x + 10, y + 4, inner - 14, 14), _oneLine);
+                    g.DrawString(agent.Now, _bold, B(_fore), new RectangleF(x + 10, y + 17, inner - 14, 16), _oneLine);
                     y += 42;
+                }
+                else if (agent.State == AgentCursors.AgentState.Thinking)
+                {
+                    Line(g, "Waiting for the model" + Dots(), _small, _muted, x, ref y, inner);
                 }
                 y += 6;
                 g.DrawLine(P(_line), x, y, x + inner, y);
@@ -305,8 +337,8 @@ namespace T3LabCAD.Core
                 {
                     if (y > _canvas.ClientSize.Height - 18) break;
                     Color mc = step.State == StepState.Ok ? Color.FromArgb(0x14, 0xAE, 0x5C)
-                        : step.State == StepState.Refused ? Color.FromArgb(0xE0, 0x8E, 0x00) : Color.FromArgb(0xF2, 0x48, 0x22);
-                    string mark = step.State == StepState.Ok ? "✓" : step.State == StepState.Refused ? "⏸" : "✕";
+                        : step.State == StepState.Refused || step.State == StepState.Busy ? Amber : Color.FromArgb(0xF2, 0x48, 0x22);
+                    string mark = step.State == StepState.Ok ? "✓" : step.State == StepState.Refused ? "⏸" : step.State == StepState.Busy ? "–" : "✕";
                     g.FillRectangle(B(ActivityView.ActionColor(step.Action)), x, y + 2, 3, 13);
                     g.DrawString(mark, _small, B(mc), x + 6, y);
                     string right = $"{step.Agent} · {Ago(step.When)}";
