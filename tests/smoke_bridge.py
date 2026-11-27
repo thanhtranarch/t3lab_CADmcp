@@ -5,6 +5,7 @@
 1. AutoCAD down: initialize/ping work, tools/list falls back, a call returns the "not reachable" error.
 2. Mock add-in up: live tools/list, a forwarded call (pin stripped, lane + queue deadline + session stamped),
    isError passthrough, autocad_busy passthrough, result capping, list_autocad_instances, the audit log.
+4. The command line (bridge.py tools / help / call / cursors / status / verify): typed flags, --document, exit codes.
 3. --tier=read --deny --agent: tools above the tier are hidden and refused before AutoCAD (tier_denied / tool_denied).
 Uses ports 49900-49902 and a temporary APPDATA so the real cache is not touched.
 """
@@ -134,6 +135,55 @@ def main():
         check("--agent / --lane / --queue-wait forwarded", reply["client"]["name"] == "Night bot" and reply["lane"] == "auto"
               and reply["queue_wait_s"] == 12.0, reply)
         c.close()
+
+        # 4. the command line: same tools, typed flags, the document pin, exit codes
+        def cli(*args):
+            r = subprocess.run([sys.executable, "-I", BRIDGE] + list(args), capture_output=True, text=True, env=env, timeout=60)
+            return r.returncode, r.stdout
+
+        code, out = cli("tools", "values")
+        check("cli tools: match first, * = takes the document", code == 0 and out.splitlines()[0].startswith("set_values") and "*" in out.splitlines()[0], out)
+        code, out = cli("help", "set_values")
+        check("cli help: typed parameters, required, choices, --document", code == 0 and "--element_ids" in out and "(required)" in out
+              and "one of a|b" in out and "--document=" in out, out)
+        code, out = cli("call", "set_values", "--element-ids=1,2", "--value=x", "--dry-run", "--mode=b", "--document=Other", "--out=compact")
+        reply = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+        echo = reply.get("echo") or {}
+        check("cli call: typed flags + pin forwarded, client cli", code == 0 and echo.get("element_ids") == [1, 2] and echo.get("dry_run") is True
+              and echo.get("mode") == "b" and echo.get("autocad_document") == "Other" and (reply.get("client") or {}).get("name") == "cli", out)
+        code, out = cli("call", "set_values", "--value=x")
+        check("cli call: missing required -> exit 2, nothing ran", code == 2 and "element_ids" in out and "bad_arguments" in out, (code, out))
+        code, out = cli("call", "set_values", "--elemnt_ids=1")
+        check("cli call: misspelled -> did you mean", code == 2 and "Did you mean --element_ids" in out, (code, out))
+        code, out = cli("call", "set_values", "--element_ids=1", "--mode=z")
+        check("cli call: not a choice -> exit 2", code == 2 and "not one of" in out, (code, out))
+        code, out = cli("call", "list_rows", "--out=tsv", "--pick=id,name")
+        check("cli tsv: header once, one row per item, picked columns", code == 0 and out.strip().splitlines() == ["id\tname", "1\tL1", "2\tL2"], out)
+        code, out = cli("call", "busy")
+        check("cli call: tool refusal -> exit 1 with error_code", code == 1 and "error_code" in out, (code, out))
+        code, out = cli("cursors")
+        check("cli cursors -> agent_cursors status", code == 0 and json.loads(out)["echo"] == {"action": "status"}, out)
+        code, out = cli("cursors", "off")
+        check("cli cursors off is the user's -> exit 2", code == 2, (code, out))
+        code, out = cli("status")
+        check("cli status: instance + options", code == 0 and json.loads(out)["instances"][0]["port"] == PORT, out)
+        code, out = cli("frobnicate")
+        check("cli unknown command -> help, exit 2", code == 2 and "Commands" in out, (code, out))
+        folder = tempfile.mkdtemp(prefix="t3lab_verify_")
+        with open(os.path.join(folder, "a.pdf"), "wb") as f:
+            f.write(b"%PDF-1.7 ...")
+        with open(os.path.join(folder, "b.dwg"), "wb") as f:
+            f.write(b"AC1032....")
+        code, out = cli("verify", folder, "--expect=2")
+        check("cli verify: good exports -> exit 0", code == 0 and json.loads(out)["ok"] == 2, out)
+        with open(os.path.join(folder, "c.pdf"), "wb") as f:
+            f.write(b"")
+        with open(os.path.join(folder, "d.dwg"), "wb") as f:
+            f.write(b"not a drawing")
+        code, out = cli("verify", folder, "--ext=pdf,dwg")
+        problems = {os.path.basename(x["path"]): x["problem"] for x in json.loads(out)["failed"]}
+        check("cli verify: empty and wrong header found -> exit 1", code == 1 and problems.get("c.pdf") == "empty"
+              and "does not start like" in problems.get("d.dwg", ""), out)
     finally:
         mock.terminate()
 

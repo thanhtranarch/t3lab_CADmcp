@@ -21,7 +21,7 @@ namespace T3LabCAD.Core
                     P("name", Str("New layout name")),
                     P("copy_from", Str("Copy this layout (default: new empty layout)")),
                     P("activate", Bool("Make it the current layout (default false)"))),
-                CreateLayout, tx: false);
+                CreateLayout, tx: false, scope: ToolScope.Active);
 
             Registry.Add("add_viewport", "Add viewport", ToolKind.Write,
                 "Add a viewport to a paper space layout showing part of model space (the layout becomes current). " +
@@ -36,7 +36,7 @@ namespace T3LabCAD.Core
                     P("scale", Any("Viewport scale, e.g. 1:100, 1/50 or 0.01 (default: fit view_window or the model extents)")),
                     P("layer", Str("Layer for the viewport (created if missing)")),
                     P("locked", Bool("Lock the display (default false)"))),
-                AddViewport, tx: false);
+                AddViewport, tx: false, scope: ToolScope.Active);
 
             Registry.Add("set_viewport", "Edit viewport", ToolKind.Write,
                 "Change a layout viewport (handle from query_entities types=[VIEWPORT] or add_viewport): scale, view_center or view_window " +
@@ -53,7 +53,7 @@ namespace T3LabCAD.Core
                     P("freeze_layers", Strs("Layers to freeze in this viewport only, wildcards allowed")),
                     P("thaw_layers", Strs("Layers to thaw in this viewport, wildcards allowed")),
                     P("layer", Str("Layer for the viewport (created if missing)"))),
-                SetViewport, tx: false);
+                SetViewport, tx: false, scope: ToolScope.Active);
         }
 
         static object CreateLayout(ToolContext c, Args a)

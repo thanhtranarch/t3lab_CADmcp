@@ -11,7 +11,7 @@ Add-in AutoCAD (giống T3Lab Revit MCP) cho phép Claude Desktop / Claude Code 
 - **Xuất:** PDF / DWFx / DWF theo layout (`export_pdf`), publish nhiều bản vẽ vào 1 PDF (`publish_pdf`), page setup, DXF, WBLOCK ra .dwg mới (`export_entities`).
 - **Lệnh:** chạy lệnh AutoCAD dạng dòng lệnh khi chưa có tool riêng.
 
-Tổng cộng **67 tool**: 65 tool chạy trong AutoCAD + 2 tool của bridge. Mỗi thay đổi là 1 bước Undo. Bảng **Agent Cursors** cho xem AI đang làm gì (xem bên dưới).
+Tổng cộng **68 tool**: 66 tool chạy trong AutoCAD + 2 tool của bridge. Mỗi thay đổi là 1 bước Undo. Bảng **Agent Cursors** cho xem AI đang làm gì (xem bên dưới).
 
 ```
 Claude ──stdio MCP──> bridge.py (%APPDATA%\T3LabCAD) ──TCP 127.0.0.1:48900-48908──> T3LabCAD add-in trong AutoCAD
@@ -65,7 +65,7 @@ Nếu AutoCAD đang mở lúc cài lần đầu: khởi động lại AutoCAD, h
 
 | Nhóm | Tool |
 |---|---|
-| Trạng thái | `get_status`, `get_sysvars`, `set_sysvar`, `t3lab_narrate` (mục tiêu + các bước cho bảng Agent Cursors) |
+| Trạng thái | `get_status`, `get_sysvars`, `set_sysvar`, `t3lab_narrate` (mục tiêu + các bước cho bảng Agent Cursors), `agent_cursors` (status · on · pause) |
 | Bản vẽ | `open_document` (tên không có thư mục = cạnh bản vẽ đang mở), `new_document` (`save_as`), `activate_document`, `save_document` (dwg / xuất dxf, `copy=true` lưu bản sao, `version` 2018/2013/2010/2007/2004/2000), `close_document` |
 | File | `list_drawing_files` (duyệt thư mục, đánh dấu file đang mở), `rename_document` (đổi tên file, bản vẽ đang mở được đóng → đổi tên → mở lại), `delete_drawing_file` (vào Recycle Bin, trừ khi `permanent=true`) |
 | Layout | `list_layouts`, `activate_layout`, `create_layout` (mới hoặc copy từ layout khác), `add_viewport` (vùng model + tỉ lệ 1:100), `set_viewport` (tỉ lệ, tâm, khoá, on/off, freeze layer riêng trong viewport) |
@@ -173,6 +173,45 @@ Giống hệt Agent Cursors của T3Lab Revit MCP (cùng bố cục, chữ, màu
 - Lựa chọn lưu ở `%APPDATA%\T3LabCAD\agent_cursors.json`. Nút X chỉ đóng bảng: `T3CURSORS` mở lại, gõ khi bảng đang mở thì tắt hẳn. Bước đọc / xem chỉ di chuyển con trỏ (không khung, không zoom). "Select changes" chỉ chọn đối tượng AI đã sửa trong bản vẽ và space đang mở. Mọi lỗi của phần hiển thị chỉ ghi log, không làm hỏng lời gọi tool.
 
 Ý tưởng con trỏ nhiều agent tham khảo từ [swarm-cursors](https://github.com/thanhtranarch/swarm-cursors) (chỉ lấy ý tưởng, không dùng mã).
+
+## Lệnh: nút, lệnh gõ, CLI, tool MCP
+
+Mọi việc trên ribbon đều làm được từ dòng lệnh (`B` = `python -I "%APPDATA%\T3LabCAD\bridge.py"`) và — trừ Start / Stop, Connect AI — từ AI app qua MCP. Cùng bảng ở README của T3Lab Revit MCP.
+
+| Việc | Revit (Add-Ins › T3Lab MCP) | AutoCAD (Add-ins › T3Lab MCP · lệnh gõ) | Dòng lệnh | Tool MCP |
+|---|---|---|---|---|
+| Bật / tắt server | Start / Stop | Start / Stop · `T3MCP` (`T3MCPSTART`, `T3MCPSTOP`) | — (server nằm trong app; `B status` cho biết có chạy không) | — |
+| Agent Cursors | Agent Cursors | Agent Cursors · `T3CURSORS` | `B cursors status\|on\|pause` | `agent_cursors` (status · on · pause) |
+| Tắt Agent Cursors · Resume | nút trên thanh / ribbon | nút trên bảng / `T3CURSORS` | — (chỉ người dùng) | — (chỉ người dùng) |
+| Kết nối AI app | Connect AI | Connect AI · `T3MCPCONNECT` | `B connect [--check] [--remove]` | — |
+| Trạng thái | Status | Status · `T3MCPSTATUS` | `B status` | `get_revit_context` / `get_status` |
+| Nạp lại core | Reload | Reload · `T3MCPRELOAD` | `B reload` | `reload_addin` |
+| Mọi tool | — | — | `B call <tool> --tham_so=giá_trị` | chính tool đó |
+| Kiểm tra file xuất | — | — | `B verify <file\|thư mục> --expect=N` | — |
+
+Bật/tắt Agent Cursors và Resume chỉ người dùng làm được: AI app không được giấu việc của mình hay gỡ Pause của người dùng.
+
+## Nhiều file cùng lúc · làm việc trên nền
+
+- **Không cần chuyển file:** tool nào có tham số `autocad_document` (`B tools` đánh dấu `*`; 34 / 66 tool) làm việc trong bất kỳ bản vẽ nào đang mở — file đang active, file khác đang mở, hoặc file mở **trên nền** — mà không đổi file người dùng đang xem. Kết quả ghi `document` + `active_document: false`; thanh Agent Cursors ghi "· in <file>".
+- **Mở trên nền:** `open_document path=... background=true` (đọc cả file .dwg vào bộ nhớ) — không có cửa sổ, người dùng không thấy, file đang active giữ nguyên. Lưu / đóng: `save_document document=<tên> [path=...]`, `close_document document=<tên> save=true|discard_changes=true`.
+- **Tool cần file active** (không có `autocad_document`: zoom, view, screenshot, selection, UCS, system variable, layout / viewport / page setup, plot PDF, `run_command`; `edit_geometry operation=boundary`) gọi kèm `autocad_document` của file khác → bị từ chối trước khi chạy: `{"error_code": "needs_active_document", "nothing_ran": true}`.
+- Danh sách tool nào làm được ở đâu được chứng minh từ mã nguồn: `python -I scripts/check_tool_scopes.py` (CI chạy); tool khai `scope: ToolScope.Active` hoặc `ToolScope.Open` (cần bản vẽ mở trong AutoCAD, không phải bản vẽ trên nền) trong `Registry.Add`.
+- Giới hạn: AutoCAD chỉ chạy một lời gọi API một lúc, nên nhiều file được xử lý **xen kẽ** (hàng đợi công bằng), không song song trong một AutoCAD. Muốn song song thật: mở nhiều AutoCAD (mỗi cái một port, `B status` liệt kê), ghim bằng `--port`.
+- Bản vẽ trên nền chỉ là `.dwg`; lưu thì ghi đè đúng file đó (người khác sửa file trong lúc đó sẽ bị ghi đè). Mỗi lời gọi đặt `WorkingDatabase` sang bản vẽ đích rồi trả lại. Tắt server (Stop / Reload / thoát AutoCAD) thì bản vẽ trên nền chưa lưu bị bỏ (log ghi lại).
+
+## Dòng lệnh (CLI)
+
+```
+B help                                         # mọi lệnh
+B tools wall                                   # tool khớp từ khoá, * = làm được trong file khác
+B help update_entities                        # tham số: kiểu, bắt buộc, lựa chọn
+B call list_layers --document="Plan B.dwg" --out=tsv
+B call query_entities --out=tsv --pick=handle,type,layer # một dòng một phần tử, đọc được bằng Excel / awk
+B verify "D:\Export" --ext=pdf,dwg --expect=12   # file xuất có đủ, không rỗng, đúng định dạng
+```
+
+Cùng đường đi với MCP (tier, audit, hàng đợi, Agent Cursors ghi "cli"). Exit code: 0 xong · 1 tool / AutoCAD từ chối hoặc lỗi (`error_code`) · 2 sai lệnh / tham số (không có gì chạy).
 
 ## Nhiều AI cùng lúc · tuỳ chọn bridge
 
@@ -289,7 +328,7 @@ Log: `%APPDATA%\T3LabCAD\logs\t3labcad.log`.
 
 | Version | Nội dung |
 |---|---|
-| 1.5.0 | Đồng bộ với T3Lab Revit MCP: cùng ribbon (Start / Stop · Agent Cursors · Connect AI · Status / Reload, icon T3 Space Line), cùng bảng Agent Cursors (bố cục, chữ, màu `T3Style`, nút Pause · Select changes · Replay · Clear, Show on drawing · Follow), cùng dòng Status. Mới: `T3MCP` (Start / Stop, tắt thì giữ tắt), `T3MCPCONNECT` (Connect AI cho 8 AI app, `register_mcp.py` mới). Ribbon: panel **T3Lab MCP** nằm trong tab **Add-ins** của AutoCAD, không còn tab "T3Lab" riêng. Hàng đợi công bằng cho nhiều AI (`Conductor.cs`, `autocad_busy` thay vì chạy muộn), lỗi dạng JSON có `error_code`. Bridge 1.1.0: `--tier` / `--deny` / `--agent` / `--lane` / `--queue-wait`, nhật ký audit, mỗi chat một agent. Agent Cursors: trạng thái in line / waiting for AutoCAD / thinking / last step ago, tag pastel ghi đối tượng ("Line 3450"), vẽ theo line / polyline / arc mới, con trỏ không đè nhau. |
+| 1.5.0 | Nhiều bản vẽ cùng lúc: `autocad_document` cho 34 tool (bản vẽ mở khác hoặc mở trên nền), `open_document background=true`, lưu / đóng bằng `document=`; `check_tool_scopes.py`. Dòng lệnh: `bridge.py status / tools / help / call / cursors / reload / connect / verify`; tool `agent_cursors`. Đồng bộ với T3Lab Revit MCP: cùng ribbon (Start / Stop · Agent Cursors · Connect AI · Status / Reload, icon T3 Space Line), cùng bảng Agent Cursors (bố cục, chữ, màu `T3Style`, nút Pause · Select changes · Replay · Clear, Show on drawing · Follow), cùng dòng Status. Mới: `T3MCP` (Start / Stop, tắt thì giữ tắt), `T3MCPCONNECT` (Connect AI cho 8 AI app, `register_mcp.py` mới). Ribbon: panel **T3Lab MCP** nằm trong tab **Add-ins** của AutoCAD, không còn tab "T3Lab" riêng. Hàng đợi công bằng cho nhiều AI (`Conductor.cs`, `autocad_busy` thay vì chạy muộn), lỗi dạng JSON có `error_code`. Bridge 1.1.0: `--tier` / `--deny` / `--agent` / `--lane` / `--queue-wait`, nhật ký audit, mỗi chat một agent. Agent Cursors: trạng thái in line / waiting for AutoCAD / thinking / last step ago, tag pastel ghi đối tượng ("Line 3450"), vẽ theo line / polyline / arc mới, con trỏ không đè nhau. |
 | 1.4.0 | 55 → 65 tool. `edit_geometry` thêm extend, trim, break, fillet, chamfer. `space: "block:TÊN"` sửa định nghĩa block. `transform_entities` thêm align, array_rect, array_polar. Field trong text / mtext + `update_fields`. `set_page_setup`, `layer_state`, `attach_underlay`, `export_entities` (WBLOCK), `set_ucs`, `attach_point_cloud`, `civil_query`, `civil_points` (Civil 3D). **Agent Cursors**: bảng hoạt động + con trỏ AI trên bản vẽ (`T3CURSORS`), `t3lab_narrate`. |
 | 1.3.0 | 47 → 55 tool. `measure`, `quantity_takeoff`, `extract_block_data` (CSV), `replace_text`, `edit_geometry` (offset, join, boundary), `sync_block_attributes`, `import_from_drawing`, `set_viewport`. `add_entities` thêm table, mleader, attdef, dim radius / diameter / angular / arc / ordinate / chain. `update_entities` thêm dynamic block property, đỉnh polyline, ô table, draw order. `query_entities` thêm length / area, lọc màu / linetype / closed, `totals`. |
 | 1.2.0 | 27 → 47 tool. File (`list_drawing_files`, `rename_document`, `delete_drawing_file`; `save_document` bản sao / bản cũ; `new_document save_as`), layout + viewport, text / dim style, linetype, `list_named_objects` / `rename_object` / `delete_object` / `purge`, group, named view, xref, `explode_entities`, `export_pdf`, `publish_pdf`. `scripts/gen_tools_snapshot.py` + kiểm tra trong CI. |

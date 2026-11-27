@@ -16,17 +16,17 @@ namespace T3LabCAD.Core
         public static void Register()
         {
             Registry.Add("get_status", "AutoCAD status", ToolKind.Read,
-                "Start here. AutoCAD version, open drawings, and for the active drawing: units, current layer/layout/space, " +
+                "Start here. AutoCAD version, open drawings (also ones opened in the background), and for the active drawing: units, current layer/layout/space, " +
                 "entity counts in model space, drawing extents and whether a command is running.",
                 Obj(), GetStatus, needsDocument: false, tx: false);
 
             Registry.Add("get_sysvars", "Read system variables", ToolKind.Read,
                 "Read AutoCAD system variables, e.g. INSUNITS, OSMODE, LTSCALE, DIMSCALE, CANNOSCALE, CLAYER.",
-                ObjR("names", P("names", Strs("System variable names"))), GetSysvars, tx: false);
+                ObjR("names", P("names", Strs("System variable names"))), GetSysvars, tx: false, scope: ToolScope.Active);
 
             Registry.Add("set_sysvar", "Set a system variable", ToolKind.Write,
                 "Set one AutoCAD system variable. The value is converted to the variable type (integer, real, string or point).",
-                ObjR("name,value", P("name", Str("System variable name")), P("value", Any("New value"))), SetSysvar, tx: false);
+                ObjR("name,value", P("name", Str("System variable name")), P("value", Any("New value"))), SetSysvar, tx: false, scope: ToolScope.Active);
         }
 
         static object GetStatus(ToolContext c, Args a)
@@ -46,6 +46,8 @@ namespace T3LabCAD.Core
                 });
             }
 
+            foreach (BackgroundDrawings.Drawing hidden in BackgroundDrawings.All) docs.Add(BackgroundDrawings.Info(hidden));
+
             var result = new Dictionary<string, object>
             {
                 ["addin"] = "T3LabCAD " + Entry.Version,
@@ -53,6 +55,8 @@ namespace T3LabCAD.Core
                 ["autocad"] = Convert.ToString(AcApp.GetSystemVariable("ACADVER")),
                 ["product"] = Convert.ToString(AcApp.GetSystemVariable("PRODUCT")),
                 ["documents"] = docs,
+                ["other_drawings"] = "Tools that list autocad_document work in any drawing above without switching: pass its name. " +
+                                     "open_document background=true opens one out of sight.",
             };
             if (active == null) return result;
 

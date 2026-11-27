@@ -25,14 +25,14 @@ namespace T3LabCAD.Core
                     P("center", Pt("center: view center")),
                     P("height", Num("center: view height in drawing units")),
                     P("margin", Num("Extra space around the target, as a fraction (default 0.05)"))),
-                Zoom);
+                Zoom, scope: ToolScope.Active);
 
             Registry.Add("screenshot", "Screenshot", ToolKind.Read,
                 "PNG image of the current AutoCAD view of the active drawing, to check what was drawn. Zoom first to frame the area.",
                 Obj(P("width", Int("Image width in pixels (default 1280, max 2400)")),
                     P("height", Int("Image height in pixels (default 800, max 1600)")),
                     P("save_path", Str("Also save the PNG to this path"))),
-                Screenshot, tx: false);
+                Screenshot, tx: false, scope: ToolScope.Active);
 
             Registry.Add("save_view", "Save named view", ToolKind.Write,
                 "Save the current view (or the window p1, p2) as a named view of the current space. replace=true overwrites one " +
@@ -43,12 +43,12 @@ namespace T3LabCAD.Core
                     P("p2", Pt("Optional window: second corner")),
                     P("category", Str("View category (for sheet sets)")),
                     P("replace", Bool("Overwrite an existing view with this name (default false)"))),
-                SaveView);
+                SaveView, scope: ToolScope.Active);
 
             Registry.Add("restore_view", "Restore named view", ToolKind.Write,
                 "Show a saved named view. A paper space view needs its layout to be current, a model view needs Model (or a viewport).",
                 ObjR("name", P("name", Str("View name"))),
-                RestoreView);
+                RestoreView, scope: ToolScope.Active);
         }
 
         static bool InPaperSpace(Database db) =>

@@ -3,7 +3,7 @@
   {
    "name": "get_status",
    "title": "AutoCAD status",
-   "description": "Start here. AutoCAD version, open drawings, and for the active drawing: units, current layer/layout/space, entity counts in model space, drawing extents and whether a command is running.",
+   "description": "Start here. AutoCAD version, open drawings (also ones opened in the background), and for the active drawing: units, current layer/layout/space, entity counts in model space, drawing extents and whether a command is running.",
    "inputSchema": {
     "type": "object",
     "properties": {}
@@ -104,6 +104,31 @@
    }
   },
   {
+   "name": "ControlTool",
+   "title": "Agent Cursors",
+   "description": "The T3Lab Agent Cursors bar that shows the user what AI apps do in AutoCAD. action=status (default): on or off, paused, options and each agent with its state. on: turn it on and show the bar. pause: refuse changes from every AI app until the user presses Resume. Only the user turns it off or resumes, on the bar or the ribbon.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "status",
+       "on",
+       "pause"
+      ],
+      "description": "What to do (default status)"
+     }
+    }
+   },
+   "annotations": {
+    "title": "Agent Cursors",
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "activate_document",
    "title": "Switch drawing",
    "description": "Make another open drawing the active one (all other tools act on the active drawing). Match by full path, file name, or file name without extension.",
@@ -129,7 +154,7 @@
   {
    "name": "open_document",
    "title": "Open drawing",
-   "description": "Open a .dwg (or .dxf) file in AutoCAD and make it active. If it is already open it is just activated. A name without folder is looked up next to the active drawing (list_drawing_files finds drawings).",
+   "description": "Open a .dwg (or .dxf) file in AutoCAD and make it active. If it is already open it is just activated. background=true reads a .dwg into memory without a window and without switching: work in it with autocad_document=<name>, then save_document / close_document with document=<name>. A name without folder is looked up next to the active drawing (list_drawing_files finds drawings).",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -140,6 +165,10 @@
      "read_only": {
       "type": "boolean",
       "description": "Open read-only (default false)"
+     },
+     "background": {
+      "type": "boolean",
+      "description": "Open out of sight; the active drawing stays active (default false)"
      }
     },
     "required": [
@@ -207,6 +236,10 @@
      "overwrite": {
       "type": "boolean",
       "description": "copy: replace an existing file at path (default false)"
+     },
+     "document": {
+      "type": "string",
+      "description": "A drawing opened in the background (name or path): saved to its file, or to path (default: the active drawing)"
      }
     }
    },
@@ -226,7 +259,7 @@
     "properties": {
      "document": {
       "type": "string",
-      "description": "Drawing name or path (default active)"
+      "description": "Drawing name or path, also one opened in the background (default active)"
      },
      "save": {
       "type": "boolean",
@@ -248,10 +281,15 @@
   {
    "name": "list_layouts",
    "title": "List layouts",
-   "description": "Model and paper space layouts (sheets) of the active drawing with tab order, viewport count, paper size and plotter.",
+   "description": "Model and paper space layouts (sheets) of the drawing with tab order, viewport count, paper size and plotter.",
    "inputSchema": {
     "type": "object",
-    "properties": {}
+    "properties": {
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
+     }
+    }
    },
    "annotations": {
     "title": "List layouts",
@@ -838,6 +876,10 @@
      "overwrite": {
       "type": "boolean",
       "description": "export: replace an existing .las file (default false)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -854,7 +896,7 @@
   {
    "name": "list_layers",
    "title": "List layers",
-   "description": "Layers of the active drawing: color, linetype, lineweight, on/off, frozen, locked, plot, current. Xref layers (NAME|LAYER) are skipped unless include_xref=true.",
+   "description": "Layers of the drawing: color, linetype, lineweight, on/off, frozen, locked, plot, current. Xref layers (NAME|LAYER) are skipped unless include_xref=true.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -869,6 +911,10 @@
      "with_counts": {
       "type": "boolean",
       "description": "Also count entities per layer in model and paper space (slower)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -931,6 +977,10 @@
      "make_current": {
       "type": "boolean",
       "description": "Make it the current layer"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -958,6 +1008,10 @@
      "merge_into": {
       "type": "string",
       "description": "Layer that receives its entities"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -1021,6 +1075,10 @@
      "make_current": {
       "type": "boolean",
       "description": "Make it the current text style"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -1098,6 +1156,10 @@
      "file": {
       "type": "string",
       "description": "Linetype file name or path (default acadiso.lin)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -1111,7 +1173,7 @@
   {
    "name": "list_named_objects",
    "title": "List named objects",
-   "description": "Named objects of the active drawing by kind: text_style (font, height, width factor), dim_style (main DIM variables, full=true for all), linetype, view, ucs, group (entity handles), mleader_style, table_style, xref (path and status: loaded, unloaded, not_found...), page_setup (plotter, paper, plot style, scale). layer, block and layout return the same as list_layers, list_blocks and list_layouts.",
+   "description": "Named objects of the drawing by kind: text_style (font, height, width factor), dim_style (main DIM variables, full=true for all), linetype, view, ucs, group (entity handles), mleader_style, table_style, xref (path and status: loaded, unloaded, not_found...), page_setup (plotter, paper, plot style, scale). layer, block and layout return the same as list_layers, list_blocks and list_layouts.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1149,6 +1211,10 @@
      "include_anonymous": {
       "type": "boolean",
       "description": "group: include unnamed groups (default false)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -1296,6 +1362,10 @@
      "dry_run": {
       "type": "boolean",
       "description": "Report what would be purged, change nothing (default false)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -1342,6 +1412,10 @@
      "selectable": {
       "type": "boolean",
       "description": "Selecting one member selects the whole group (default true)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -1358,7 +1432,7 @@
   {
    "name": "import_from_drawing",
    "title": "Import from drawing",
-   "description": "Copy blocks, layers, text / dimension / multileader / table styles or linetypes from another .dwg or .dwt into the active drawing, with what they depend on (a block brings its layers and styles; ones that already exist here are kept). Objects that already exist are skipped, or redefined with replace=true: a block gets the new contents (every insert changes; run sync_block_attributes if its attributes changed); layers and styles get the new settings. Dynamic blocks are not redefined here.",
+   "description": "Copy blocks, layers, text / dimension / multileader / table styles or linetypes from another .dwg or .dwt into the drawing, with what they depend on (a block brings its layers and styles; ones that already exist here are kept). Objects that already exist are skipped, or redefined with replace=true: a block gets the new contents (every insert changes; run sync_block_attributes if its attributes changed); layers and styles get the new settings. Dynamic blocks are not redefined here.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1389,6 +1463,10 @@
      "replace": {
       "type": "boolean",
       "description": "Redefine objects that already exist (default false: keep them)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -1501,6 +1579,10 @@
      "offset": {
       "type": "integer",
       "description": "Skip this many matches (paging)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -1552,6 +1634,10 @@
      "offset": {
       "type": "integer",
       "description": "Skip this many (paging)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -1565,7 +1651,7 @@
   {
    "name": "list_blocks",
    "title": "List block definitions",
-   "description": "Block definitions of the active drawing with attribute definitions, entity count, insert count, dynamic/xref flags.",
+   "description": "Block definitions of the drawing with attribute definitions, entity count, insert count, dynamic/xref flags.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1580,6 +1666,10 @@
      "include_xrefs": {
       "type": "boolean",
       "description": "Include xrefs (default true)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -1679,6 +1769,10 @@
      "extend": {
       "type": "boolean",
       "description": "intersections: also where the extended curves would meet (default false)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -1754,6 +1848,10 @@
        ";"
       ],
       "description": "CSV separator (default ,; use ; for Excel with comma decimals)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -1808,6 +1906,10 @@
      "limit": {
       "type": "integer",
       "description": "Max rows returned in the result (default 500; the CSV gets all)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -1868,6 +1970,10 @@
        ]
       },
       "description": "Entities to create"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -1913,6 +2019,10 @@
        ]
       },
       "description": "Per-entity changes"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -1936,6 +2046,10 @@
        "type": "string"
       },
       "description": "Entity handles (hex strings from query_entities)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2090,6 +2204,10 @@
        }
       },
       "description": "mirror: two points"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2143,6 +2261,10 @@
      "description": {
       "type": "string",
       "description": "Block description"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2179,6 +2301,10 @@
      "keep_original": {
       "type": "boolean",
       "description": "Keep the original entities (default false)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2256,6 +2382,10 @@
      "limit": {
       "type": "integer",
       "description": "Max samples returned (default 50)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2384,6 +2514,10 @@
      "layer": {
       "type": "string",
       "description": "Layer for the new entities of offset / join / boundary (default: as the source / current layer)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2418,6 +2552,10 @@
      "remove_extra": {
       "type": "boolean",
       "description": "Remove attributes whose tag is not in the definition (default true)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2434,10 +2572,15 @@
   {
    "name": "update_fields",
    "title": "Update fields",
-   "description": "Re-evaluate the fields of the active drawing, like UPDATEFIELD on everything (object areas and lengths, dates, file name). Make fields with add_entities text / mtext field {...}.",
+   "description": "Re-evaluate the fields of the drawing, like UPDATEFIELD on everything (object areas and lengths, dates, file name). Make fields with add_entities text / mtext field {...}.",
    "inputSchema": {
     "type": "object",
-    "properties": {}
+    "properties": {
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
+     }
+    }
    },
    "annotations": {
     "title": "Update fields",
@@ -2493,6 +2636,10 @@
      "layer": {
       "type": "string",
       "description": "Layer for the xref insert (created if missing)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2535,6 +2682,10 @@
      "new_path": {
       "type": "string",
       "description": "repath: the new file path"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2596,6 +2747,10 @@
      "layer": {
       "type": "string",
       "description": "Layer (created if missing)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2612,7 +2767,7 @@
   {
    "name": "export_entities",
    "title": "Write entities to a drawing (WBLOCK)",
-   "description": "WBLOCK: write entities (handles, all from one space) or a block definition (block) to a new .dwg, with the layers and styles they use. The active drawing does not change. version saves an older format.",
+   "description": "WBLOCK: write entities (handles, all from one space) or a block definition (block) to a new .dwg, with the layers and styles they use. The drawing itself does not change. version saves an older format.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -2655,6 +2810,10 @@
      "overwrite": {
       "type": "boolean",
       "description": "Replace an existing file (default false)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2759,6 +2918,10 @@
      "layer": {
       "type": "string",
       "description": "Layer (created if missing)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [
@@ -2806,6 +2969,10 @@
      "station_offset": {
       "type": "object",
       "description": "{alignment: name, points: [[x, y], ...]}"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     }
    },
@@ -2844,6 +3011,10 @@
      "surface": {
       "type": "string",
       "description": "Also add the points as vertices of this TIN surface (created if missing)"
+     },
+     "autocad_document": {
+      "type": "string",
+      "description": "Drawing to work in: name or path of an open drawing, or of one opened in the background (open_document background=true). Default: the active drawing. It does not switch the drawing the user sees"
      }
     },
     "required": [

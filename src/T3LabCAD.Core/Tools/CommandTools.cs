@@ -37,12 +37,12 @@ namespace T3LabCAD.Core
                     P("wait_seconds", Num("Max seconds to wait for the command to finish (default 15, max 120)")),
                     P("cancel_unfinished", Bool("Press Esc if the command is still waiting for input at the end (default true)")),
                     P("echo", Bool("Echo on the AutoCAD command line (default true)"))),
-                RunCommand, background: true);
+                RunCommand, background: true, scope: ToolScope.Active);
 
             Registry.Add("cancel_command", "Cancel running command", ToolKind.App,
                 "Press Esc in the active drawing to cancel the running command. Use it for a command run_command left open, " +
                 "or when the user agrees to cancel what they are doing: other write tools refuse to run while a command is active.",
-                Obj(), CancelCommand, tx: false, duringCommand: true);
+                Obj(), CancelCommand, tx: false, duringCommand: true, scope: ToolScope.Active);
 
             Registry.Add("reload_addin", "Reload add-in", ToolKind.App,
                 "Reload T3LabCAD.Core.dll from the bundle folder after installing a new build (scripts/install.ps1). " +

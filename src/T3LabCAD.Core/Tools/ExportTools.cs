@@ -38,7 +38,7 @@ namespace T3LabCAD.Core
                     P("center", Bool("Center on the paper")),
                     P("rotation", Enum("Plot rotation in degrees", "0", "90", "180", "270")),
                     P("list_options", Bool("Only list plotters, paper sizes (of plotter) and plot styles; plot nothing"))),
-                ExportPdf, tx: false);
+                ExportPdf, tx: false, scope: ToolScope.Active);
 
             Registry.Add("publish_pdf", "Publish to PDF", ToolKind.Write,
                 "Publish layouts of one or more drawings (open, or files on disk) into one multi-sheet PDF (or DWFx / DWF), like PUBLISH. " +
@@ -50,7 +50,7 @@ namespace T3LabCAD.Core
                     P("format", Enum("Output format (default pdf)", "pdf", "dwfx", "dwf")),
                     P("page_setup", Str("Named page setup to use for every sheet")),
                     P("page_setup_file", Str("Drawing or template that holds page_setup (default: each drawing)"))),
-                PublishPdf, tx: false);
+                PublishPdf, tx: false, scope: ToolScope.Active);
         }
 
         static readonly Dictionary<string, string> DefaultPlotter = new Dictionary<string, string>

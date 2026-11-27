@@ -59,6 +59,8 @@ namespace T3LabCAD.Core
             AcApp.DocumentManager.DocumentDestroyed -= OnDocumentDestroyed;
             try { AgentCursors.Shutdown(); }
             catch (Exception ex) { Log.Error("agent cursors: " + ex.Message); }
+            try { BackgroundDrawings.CloseAll(); }   // Stop runs on AutoCAD's thread (commands, reload, exit)
+            catch (Exception ex) { Log.Error("background drawings: " + ex.Message); }
             _server.Stop();
             _server = null;
             Main?.Dispose();
@@ -67,6 +69,15 @@ namespace T3LabCAD.Core
         }
 
         public static bool Running => _server != null;
+
+        /// <summary>A pin that names the active drawing (socket thread: compares with the name the events keep).</summary>
+        internal static bool IsActiveName(string pin)
+        {
+            string active = ActiveDocument ?? "", want = (pin ?? "").Trim().Trim('"');
+            return active.Length > 0 && (string.Equals(active, want, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(System.IO.Path.GetFileName(active), want, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(System.IO.Path.GetFileNameWithoutExtension(active), want, StringComparison.OrdinalIgnoreCase));
+        }
 
         /// <summary>Same lines as T3Lab Revit MCP's Status.</summary>
         public static string Status()

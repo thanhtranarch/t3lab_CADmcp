@@ -10,7 +10,7 @@ namespace T3LabCAD.Core
         public static void Register()
         {
             Registry.Add("list_layers", "List layers", ToolKind.Read,
-                "Layers of the active drawing: color, linetype, lineweight, on/off, frozen, locked, plot, current. " +
+                "Layers of the drawing: color, linetype, lineweight, on/off, frozen, locked, plot, current. " +
                 "Xref layers (NAME|LAYER) are skipped unless include_xref=true.",
                 Obj(P("name", Str("Wildcard filter, e.g. A-WALL* (default all)")),
                     P("include_xref", Bool("Include xref-dependent layers (default false)")),

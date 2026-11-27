@@ -18,6 +18,17 @@ TOOLS = [
     {"name": "run_command", "description": "mock command", "inputSchema": {"type": "object", "properties": {}}, "annotations": {"readOnlyHint": False}},
     {"name": "fail", "description": "always fails", "inputSchema": {"type": "object", "properties": {}}, "annotations": READ},
     {"name": "busy", "description": "always busy", "inputSchema": {"type": "object", "properties": {}}, "annotations": READ},
+    # for the command line: typed parameters + the document pin, rows, the Agent Cursors control
+    {"name": "set_values", "description": "Set values. Typed parameters", "annotations": {"readOnlyHint": False},
+     "inputSchema": {"type": "object", "required": ["element_ids"], "properties": {
+         "element_ids": {"type": "array", "items": {"type": "integer"}, "description": "ids"},
+         "value": {"type": "string", "description": "value"}, "dry_run": {"type": "boolean", "description": "preview"},
+         "mode": {"type": "string", "enum": ["a", "b"], "description": "mode"},
+         "autocad_document": {"type": "string", "description": "document"}}}},
+    {"name": "list_rows", "description": "Rows of things", "annotations": READ,
+     "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "description": "max"}}}},
+    {"name": "agent_cursors", "description": "Agent Cursors bar", "annotations": {"readOnlyHint": False},
+     "inputSchema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["status", "on", "pause"], "description": "what"}}}},
 ]
 BUSY = {"error_code": "autocad_busy", "message": "AutoCAD is busy with another AI call (add_entities for ChatGPT, 31 s so far). Nothing was run.",
         "retryable": True, "nothing_ran": True, "retry_after_s": 5, "ahead": 0,
@@ -41,6 +52,9 @@ class Handler(socketserver.StreamRequestHandler):
             elif method == "tools/call":
                 if params.get("name") == "fail":
                     result = {"content": [{"type": "text", "text": "mock failure"}], "isError": True}
+                elif params.get("name") == "list_rows":
+                    rows = [{"id": 1, "name": "L1", "extra": "x"}, {"id": 2, "name": "L2", "extra": "y"}]
+                    result = {"content": [{"type": "text", "text": json.dumps({"count": 2, "rows": rows})}]}
                 elif params.get("name") == "busy":
                     result = {"content": [{"type": "text", "text": json.dumps(BUSY)}], "isError": True}
                 else:

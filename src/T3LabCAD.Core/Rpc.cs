@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using Autodesk.AutoCAD.DatabaseServices;
 using System.Threading;
 using Autodesk.AutoCAD.ApplicationServices;
 using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
@@ -94,6 +95,7 @@ namespace T3LabCAD.Core
             bool ok = false, refused = false, busy = false;
             string error = null;
             object value = null;
+            string pinned = args.Take(Registry.DocumentPin);   // another drawing; resolved on AutoCAD's thread
             int deadlineMs = queueWaitS > 0 ? (int)Math.Min(queueWaitS * 1000, MaxQueueWaitMs) : DefaultQueueWaitMs;
             // one call at a time, in a fair order (Conductor); t3lab_narrate and cancel_command never wait in line
             Conductor.Ticket ticket = null;
@@ -111,6 +113,8 @@ namespace T3LabCAD.Core
                     AgentCursors.Granted(step);
                     if (def.Background) { ticket.MarkRunning(); AgentCursors.OnMain(step); }
                 }
+                if (def.Background && pinned != null && !Entry.IsActiveName(pinned))
+                    throw new NeedsActiveException($"{def.Name} works in the active drawing only, and {pinned} is not active in AutoCAD.");
                 if (def.Background)
                 {
                     AgentCursors.Capture watch = capture ? OnMainOrNull(() => StartCapture(step)) : null;
@@ -132,15 +136,8 @@ namespace T3LabCAD.Core
                             refused = true;
                             throw new ToolError(AgentCursors.PausedMessage);
                         }
-                        AgentCursors.Capture watch = null;
-                        if (capture)
-                        {
-                            try { watch = StartCapture(step); }
-                            catch (Exception ex) { Log.Error("agent cursors capture: " + ex.Message); }
-                        }
-                        try { return Execute(def, args); }
-                        finally { watch?.Dispose(); }
-                    }, startMs, applicationContext: def.Kind == ToolKind.App);
+                        return Execute(def, args, pinned, step, capture);
+                    }, startMs, applicationContext: def.Kind == ToolKind.App || pinned != null);   // another drawing is locked from the application
                 }
                 ok = true;
                 return Success(value);
@@ -166,6 +163,13 @@ namespace T3LabCAD.Core
                 outcome = "not started: " + ns.Message;
                 error = ns.Message;
                 return ErrorResult(ns.Message);
+            }
+            catch (NeedsActiveException na)
+            {
+                outcome = "needs active document";
+                error = na.Message;
+                return Coded("needs_active_document", na.Message, true,
+                    "Call again without autocad_document, after activate_document (or open_document without background) makes that drawing active.");
             }
             catch (ToolError te) when (refused)
             {
@@ -278,30 +282,78 @@ namespace T3LabCAD.Core
             return doc == null ? null : new AgentCursors.Capture(step, doc.Database);
         }
 
-        static object Execute(ToolDef def, Args args)
+        /// <summary>Where a call works: the active drawing, another open one, or one opened in the background.</summary>
+        sealed class Target
         {
-            Document doc = AcApp.DocumentManager.MdiActiveDocument;
-            if (def.NeedsDocument && doc == null)
+            public Document Doc;                    // null for a background drawing
+            public Database Db;
+            public string FilePath, Name;
+            public bool Active;
+            public BackgroundDrawings.Drawing Hidden;
+        }
+
+        /// <summary>The pinned drawing (autocad_document), else the active one; null when nothing is open. Main thread.</summary>
+        static Target Resolve(string pinned)
+        {
+            Document active = AcApp.DocumentManager.MdiActiveDocument;
+            Document doc = pinned == null ? active : DocumentTools.Find(pinned);
+            if (doc != null)
+                return new Target { Doc = doc, Db = doc.Database, FilePath = doc.IsNamedDrawing ? doc.Name : null, Name = doc.Name, Active = doc == active };
+            if (pinned == null) return null;
+            BackgroundDrawings.Drawing hidden = BackgroundDrawings.Find(pinned);
+            if (hidden != null) return new Target { Db = hidden.Db, FilePath = hidden.Path, Name = hidden.Path, Hidden = hidden };
+            var names = AcApp.DocumentManager.Cast<Document>().Select(d => System.IO.Path.GetFileName(d.Name))
+                .Concat(BackgroundDrawings.All.Select(d => System.IO.Path.GetFileName(d.Path) + " (background)"));
+            throw new ToolError($"No drawing '{pinned}' is open. Open: {string.Join(", ", names)}. " +
+                                "Open it first: open_document (background=true keeps it out of sight).");
+        }
+
+        static object Execute(ToolDef def, Args args, string pinned, AgentStep step, bool capture)
+        {
+            Target t = Resolve(pinned);
+            if (t != null && !t.Active)
+            {
+                string file = System.IO.Path.GetFileName(t.Name);
+                if (!Registry.TakesPin(def))
+                    throw new NeedsActiveException($"{def.Name} works in the active drawing only, and {file} is not active in AutoCAD.");
+                if (def.Scope == ToolScope.Open && t.Doc == null)
+                    throw new NeedsActiveException($"{def.Name} needs the drawing open in AutoCAD, and {file} is open in the background only (open_document without background).");
+                if (t.Hidden != null && t.Hidden.ReadOnly && def.Kind == ToolKind.Write)
+                    throw new ToolError($"{file} was opened read-only in the background; nothing was changed.");
+            }
+            AgentCursors.SetDocument(step, t?.Name, t == null || t.Active);
+            Document doc = t?.Doc;
+            if (def.NeedsDocument && t == null)
                 throw new ToolError("No drawing is open in AutoCAD. Use open_document or new_document first.");
-            if (def.Kind != ToolKind.Read && !def.DuringCommand && doc != null)
+            if (def.Kind != ToolKind.Read && !def.DuringCommand && doc != null && t.Active)
             {
                 string cip = doc.CommandInProgress;
                 if (!string.IsNullOrEmpty(cip))
                     throw new ToolError($"AutoCAD is busy with command '{cip}'. Ask the user to finish it or press Esc, then retry.");
             }
 
-            var ctx = new ToolContext { Doc = doc, Db = doc?.Database, Ed = doc?.Editor };
+            var ctx = new ToolContext { Doc = doc, Db = t?.Db, Ed = t != null && t.Active ? doc.Editor : null, FilePath = t?.FilePath };
             DocumentLock docLock = def.Kind == ToolKind.Write && doc != null ? doc.LockDocument() : null;
+            // AutoCAD fills new objects from the working database (layer, styles, text alignment): the target's, for this call
+            Database working = HostApplicationServices.WorkingDatabase;
+            bool swap = ctx.Db != null && working != ctx.Db;
+            AgentCursors.Capture watch = null;
             try
             {
-                object result;
-                if (def.Tx && doc != null)
+                if (swap) HostApplicationServices.WorkingDatabase = ctx.Db;
+                if (capture && ctx.Db != null && step != null)
                 {
-                    using (var tr = doc.Database.TransactionManager.StartTransaction())
+                    try { watch = new AgentCursors.Capture(step, ctx.Db); }
+                    catch (Exception ex) { Log.Error("agent cursors capture: " + ex.Message); }
+                }
+                object result;
+                if (def.Tx && ctx.Db != null)
+                {
+                    using (var tr = ctx.Db.TransactionManager.StartTransaction())
                     {
                         ctx.Tr = tr;
                         result = def.Handler(ctx, args);
-                        if (def.Kind == ToolKind.Write && !ctx.NeedsRegen) ctx.NeedsRegen = Acad.AnyInBlockDefinition(doc.Database, tr, args);
+                        if (def.Kind == ToolKind.Write && !ctx.NeedsRegen) ctx.NeedsRegen = Acad.AnyInBlockDefinition(ctx.Db, tr, args);
                         tr.Commit();
                     }
                 }
@@ -310,15 +362,28 @@ namespace T3LabCAD.Core
                     result = def.Handler(ctx, args);
                 }
 
-                if (def.Kind == ToolKind.Write && doc != null)
+                if (def.Kind == ToolKind.Write)
                 {
-                    if (ctx.NeedsRegen) doc.Editor.Regen();
-                    AcApp.UpdateScreen();
+                    if (t?.Hidden != null) t.Hidden.Modified = true;
+                    else if (doc != null && t.Active)
+                    {
+                        if (ctx.NeedsRegen) doc.Editor.Regen();
+                        AcApp.UpdateScreen();
+                    }
+                }
+                // say where it happened when that is not the drawing the user looks at
+                if (t != null && !t.Active && result is Dictionary<string, object> r && !r.ContainsKey("document"))
+                {
+                    r["document"] = System.IO.Path.GetFileName(t.Name);
+                    r["active_document"] = false;
+                    if (t.Hidden != null) r["background"] = true;
                 }
                 return result;
             }
             finally
             {
+                watch?.Dispose();
+                if (swap) HostApplicationServices.WorkingDatabase = working;
                 docLock?.Dispose();
             }
         }

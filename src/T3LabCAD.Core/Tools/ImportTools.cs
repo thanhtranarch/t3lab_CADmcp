@@ -16,7 +16,7 @@ namespace T3LabCAD.Core
         public static void Register()
         {
             Registry.Add("import_from_drawing", "Import from drawing", ToolKind.Write,
-                "Copy blocks, layers, text / dimension / multileader / table styles or linetypes from another .dwg or .dwt into the active " +
+                "Copy blocks, layers, text / dimension / multileader / table styles or linetypes from another .dwg or .dwt into the " +
                 "drawing, with what they depend on (a block brings its layers and styles; ones that already exist here are kept). " +
                 "Objects that already exist are skipped, or redefined with replace=true: a block gets the new contents (every insert " +
                 "changes; run sync_block_attributes if its attributes changed); layers and styles get the new settings. Dynamic blocks " +
@@ -73,8 +73,8 @@ namespace T3LabCAD.Core
             if (!Kinds.Contains(kind)) throw new ToolError($"kind must be one of: {string.Join(", ", Kinds)}.");
             string path = DocumentTools.ResolvePath(a.ReqStr("path"), ".dwg");
             if (!File.Exists(path)) throw new ToolError($"File not found: {path}");
-            if (c.Doc.IsNamedDrawing && string.Equals(path, c.Doc.Name, StringComparison.OrdinalIgnoreCase))
-                throw new ToolError("The source is the active drawing itself.");
+            if (c.FilePath != null && string.Equals(path, c.FilePath, StringComparison.OrdinalIgnoreCase))
+                throw new ToolError("The source is the drawing itself.");
             List<string> patterns = a.Strs("names");
             if (patterns.Count == 0) throw new ToolError("'names' is empty (use * for everything).");
             bool replace = a.Bool("replace", false);

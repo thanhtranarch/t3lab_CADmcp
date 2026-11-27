@@ -21,6 +21,8 @@ it, and when it disappears (connection refused) calls fail over to another live
 instance. A call can pin an instance with an `autocad_port` argument (stripped
 before forwarding); a pinned call never fails over.
 
+Command line: `python -I bridge.py help` (status, tools, help, call, cursors, reload, connect, verify).
+
 Several AI apps share one AutoCAD: the add-in runs one call at a time in a fair
 order (Conductor.cs). Each call carries this bridge's lane and queue_wait_s; a
 call that cannot start in time comes back as error_code autocad_busy and never
@@ -38,10 +40,16 @@ Options (flag or environment variable), for the MCP client config:
 Stdlib only.
 """
 
+import base64
+import difflib
+import glob
 import json
 import os
 import socket
+import subprocess
 import sys
+import tempfile
+import textwrap
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -62,6 +70,7 @@ LIST_TIMEOUT = 10.0
 CALL_TIMEOUT = 900.0       # add-in waits up to 60 s for AutoCAD to be free, then the tool runs
 WATCH_INTERVAL = 10.0
 MAX_TEXT_CHARS = 90000     # Claude Code moves results over ~25k tokens to a file
+DOC_PIN = "autocad_document"   # = Registry.DocumentPin in the add-in: work in another open document without switching
 PIN_ARG = "autocad_port"
 
 DATA_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "T3LabCAD")
@@ -84,6 +93,9 @@ INSTRUCTIONS = (
     "delete_object, purge; create them with set_layer, create_block, create_layout, set_text_style, set_dim_style, "
     "load_linetype, save_view, set_group, attach_xref, or bring them from another drawing with import_from_drawing. "
     "run_command covers other AutoCAD commands (command-line versions, no dialogs). "
+    "Several drawings: tools that list autocad_document work in any open drawing without switching the user's view (pass its "
+    "name, get_status lists them); open_document background=true reads a .dwg out of sight, save_document / close_document "
+    "with document=<name> write it back. Tools without autocad_document need the active drawing. "
     "For multi-step work, if t3lab_narrate is listed, call it first (goal + tasks) and with step=N as you go: the user may watch on the "
     "T3Lab Agent Cursors bar. "
     "Errors with an error_code are JSON: autocad_busy = another AI app is using AutoCAD and nothing ran (do other work, retry "
@@ -549,7 +561,381 @@ def handle(message, pool):
         reply(request_id, error={"code": -32601, "message": "Method not found: {}".format(method)})
 
 
+def check():
+    """`python bridge.py --check` / `bridge.py status`: one JSON line for installers and AI agents; exit 0 when AutoCAD answers."""
+    instances = scan()
+    print(json.dumps({
+        "bridge": BRIDGE_VERSION,
+        "ports": "{}-{}".format(PORT_MIN, PORT_MAX),
+        "autocad_running": bool(instances),
+        "instances": instances,
+        "cached_tools": len(cached_tools()),
+        "agent": AGENT, "tier": TIER, "lane": LANE, "queue_wait_s": QUEUE_WAIT_S, "deny": sorted(DENY), "audit": AUDIT,
+        "hint": None if instances else NOT_RUNNING,
+    }, ensure_ascii=False))
+    return 0 if instances else 1
+
+
+# --------------------------------------------------------------------------- command line (every action from a shell)
+
+CLI_HELP = """T3Lab AutoCAD MCP bridge. No command: the MCP server over stdio. With a command: the same tools from a shell.
+
+    python -I bridge.py <command> [options]
+
+Commands
+  status                        AutoCAD instances, their queue and these bridge options (exit 1 when none answers)
+  tools [words]                 tool names and their first sentence, best match first; * = works in any open document
+  help <tool>                   a tool's parameters: type, required, choices, description
+  call <tool> [--param=value ...] [--json='{...}'] [--json-file=file]
+                                run a tool; values typed from its schema: numbers, true/false, lists as a,b,c, objects as JSON
+  cursors [status|on|pause]     the Agent Cursors bar (only the user turns it off or resumes, on the bar or the ribbon)
+  reload                        load the add-in core again after an update
+  connect [--check] [--remove] [--clients=a,b]
+                                add this AutoCAD to the AI apps on this PC (or check / remove), as the Connect AI button
+  verify <file|folder|glob>... [--ext=pdf,dwg] [--since=minutes] [--expect=N]
+                                exported files exist, are not empty and start like their format
+
+Options
+  --document=<name>             work in this document without switching: an open one, or one opened in the background
+                                (the autocad_document argument of the tools marked *)
+  --port=<n>                    this AutoCAD instance (status lists them)
+  --out=pretty|compact|tsv      tsv: one row per item of the first list in the result; --pick=a,b keeps those fields
+  --agent --tier --deny --lane --queue-wait --audit: the bridge options at the top of this file
+
+Exit codes: 0 done, 1 the tool or AutoCAD refused or failed (error_code in the output), 2 wrong command or arguments (nothing ran).
+"""
+
+CLI_COMMANDS = ("status", "tools", "help", "call", "cursors", "reload", "connect", "verify")
+CLI_GLOBAL = {"agent", "tier", "deny", "lane", "queue-wait", "audit", "port", "document", "out", "pick", "json", "json-file",
+              "check", "remove", "clients", "ext", "since", "expect"}
+
+
+class CliError(Exception):
+    """Wrong command or arguments: exit 2, nothing ran."""
+
+
+def cli_parse(argv):
+    """argv -> (words, flags): --name=value, --flag (true), --no-flag (false)."""
+    words, flags = [], {}
+    for arg in argv:
+        if arg.startswith("--") and len(arg) > 2:
+            body = arg[2:]
+            if "=" in body:
+                key, value = body.split("=", 1)
+            elif body.startswith("no-"):
+                key, value = body[3:], False
+            else:
+                key, value = body, True
+            flags[key] = value
+        else:
+            words.append(arg)
+    return words, flags
+
+
+def cli_tools():
+    tools = list_tools()
+    return {t.get("name"): t for t in tools}
+
+
+def cli_tool(name, tools):
+    if name in tools:
+        return tools[name]
+    close = difflib.get_close_matches(name or "", list(tools), n=3, cutoff=0.5)
+    raise CliError("No tool '{}'.{} List them with: bridge.py tools".format(name, " Did you mean: " + ", ".join(close) + "?" if close else ""))
+
+
+def cli_value(name, raw, prop):
+    """A flag's text as the type the tool's schema asks for."""
+    kind = (prop or {}).get("type")
+    if raw is True or raw is False:
+        if kind in (None, "boolean"):
+            return raw
+        raise CliError("--{} needs a value (--{}=...)".format(name, name))
+    try:
+        if kind == "boolean":
+            low = raw.strip().lower()
+            if low in ("true", "1", "yes", "on"):
+                return True
+            if low in ("false", "0", "no", "off"):
+                return False
+            raise ValueError("true or false")
+        if kind == "integer":
+            value = int(raw)
+        elif kind == "number":
+            value = float(raw)
+        elif kind == "array":
+            if raw.strip().startswith("["):
+                value = json.loads(raw)
+            else:
+                item = ((prop or {}).get("items") or {}).get("type")
+                parts = [p.strip() for p in raw.split(",") if p.strip()]
+                value = [int(p) if item == "integer" else float(p) if item == "number" else p for p in parts]
+        elif kind == "object":
+            value = json.loads(raw)
+            if not isinstance(value, dict):
+                raise ValueError("a JSON object")
+        else:
+            value = raw
+    except ValueError as ex:
+        raise CliError("--{}: {!r} is not {} ({})".format(name, raw, kind or "valid", ex))
+    choices = (prop or {}).get("enum")
+    if choices and value not in choices:
+        raise CliError("--{}: {!r} is not one of {}".format(name, value, ", ".join(map(str, choices))))
+    return value
+
+
+def cli_arguments(tool, flags):
+    """Tool arguments from --json / --json-file, then the flags (flags win); refuses unknown names and missing required ones."""
+    schema = tool.get("inputSchema") or {}
+    props = schema.get("properties") or {}
+    args = {}
+    if flags.get("json-file"):
+        with open(flags["json-file"], "r", encoding="utf-8") as f:
+            args.update(json.load(f))
+    if isinstance(flags.get("json"), str):
+        try:
+            args.update(json.loads(flags["json"]))
+        except ValueError as ex:
+            raise CliError("--json is not valid JSON: {}".format(ex))
+    for key, raw in flags.items():
+        if key in CLI_GLOBAL:
+            continue
+        name = key.replace("-", "_")
+        if name not in props:
+            close = difflib.get_close_matches(name, list(props), n=2, cutoff=0.6)
+            raise CliError("{} has no parameter --{}.{} See: bridge.py help {}".format(
+                tool["name"], key, " Did you mean --" + " / --".join(close) + "?" if close else "", tool["name"]))
+        args[name] = cli_value(key, raw, props[name])
+    missing = [r for r in schema.get("required") or [] if args.get(r) in (None, "")]
+    if missing:
+        raise CliError("{} needs --{}. See: bridge.py help {}".format(tool["name"], " --".join(missing), tool["name"]))
+    if isinstance(flags.get("document"), str):
+        args[DOC_PIN] = flags["document"]
+    if flags.get("port") not in (None, True, False):
+        args[PIN_ARG] = flags["port"]
+    return args
+
+
+def cli_rows(data):
+    """The first list of objects in a result (the rows a tsv shows), or None."""
+    if isinstance(data, list) and data and all(isinstance(x, dict) for x in data):
+        return data
+    if isinstance(data, dict):
+        for value in data.values():
+            if isinstance(value, list) and value and all(isinstance(x, dict) for x in value):
+                return value
+    return None
+
+
+def cli_cell(value):
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return "" if value is None else str(value).replace("\t", " ").replace("\n", " ")
+
+
+def cli_render(data, out, pick):
+    rows = cli_rows(data)
+    if pick and rows is not None:
+        data = rows = [{k: r.get(k) for k in pick} for r in rows]
+    elif pick and isinstance(data, dict):
+        data = {k: data.get(k) for k in pick}
+    if out == "tsv" and rows is not None:
+        columns = pick or list(dict.fromkeys(k for r in rows for k in r))
+        return "\n".join(["\t".join(columns)] + ["\t".join(cli_cell(r.get(c)) for c in columns) for r in rows])
+    if out in ("compact", "tsv"):
+        return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def cli_emit(result, flags):
+    """Print a tool result; images go to a temp file. Exit code 1 when the tool refused or failed."""
+    out = flags.get("out") if isinstance(flags.get("out"), str) else "pretty"
+    if out not in ("pretty", "compact", "tsv"):
+        raise CliError("--out: pretty, compact or tsv")
+    pick = [p.strip() for p in flags["pick"].split(",") if p.strip()] if isinstance(flags.get("pick"), str) else None
+    for block in (result or {}).get("content") or []:
+        if block.get("type") == "image":
+            ext = ".png" if "png" in (block.get("mimeType") or "png") else ".jpg"
+            fd, path = tempfile.mkstemp(prefix="t3lab_", suffix=ext)
+            with os.fdopen(fd, "wb") as f:
+                f.write(base64.b64decode(block.get("data") or ""))
+            print(json.dumps({"image": path}))
+        elif block.get("type") == "text":
+            try:
+                print(cli_render(json.loads(block.get("text") or ""), out, pick))
+            except ValueError:
+                print(block.get("text"))
+    return 1 if (result or {}).get("isError") else 0
+
+
+def cli_call(name, flags):
+    tools = cli_tools()
+    tool = cli_tool(name, tools)
+    return cli_emit(call_tool({"name": tool["name"], "arguments": cli_arguments(tool, flags)}), flags)
+
+
+def cli_list(words):
+    tools = list(cli_tools().values())
+    want = [w.lower() for w in words]
+
+    def score(t):
+        text = (t.get("name", "") + " " + t.get("description", "")).lower()
+        return sum((3 if w in t.get("name", "").lower() else 0) + (1 if w in text else 0) for w in want)
+
+    if want:
+        tools = sorted((t for t in tools if score(t) > 0), key=lambda t: -score(t))
+    for t in tools:
+        first = (t.get("description") or "").split(". ")[0].rstrip(".")
+        star = "*" if DOC_PIN in ((t.get("inputSchema") or {}).get("properties") or {}) else " "
+        print("{:28}{} {}".format(t.get("name"), star, first[:110]))
+    if not tools:
+        print("No tool matches. bridge.py tools lists them all.")
+        return 1
+    return 0
+
+
+def cli_help(name):
+    tool = cli_tool(name, cli_tools())
+    schema = tool.get("inputSchema") or {}
+    props = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+    notes = tool.get("annotations") or {}
+    print("{} - {}".format(tool["name"], tool.get("title") or ""))
+    print(textwrap.fill(tool.get("description") or "", 110))
+    print("\n" + ("read-only" if notes.get("readOnlyHint") else "changes the document or writes files") +
+          (", destructive" if notes.get("destructiveHint") else ""))
+    print("\nbridge.py call {}{}".format(tool["name"], "".join(" --{}=...".format(r) for r in schema.get("required") or [])))
+    for key, prop in props.items():
+        if key == DOC_PIN:
+            continue
+        kind = prop.get("type") or "any"
+        if kind == "array":
+            kind = "list of " + (((prop.get("items") or {}).get("type")) or "values") + " (a,b,c or JSON)"
+        if prop.get("enum"):
+            kind = "one of " + "|".join(map(str, prop["enum"]))
+        print("  --{:22} {}{}\n  {:24} {}".format(key, kind, "  (required)" if key in required else "", "", prop.get("description") or ""))
+    if DOC_PIN in props:
+        print("  --document=<name>        works in any open document, also one opened in the background, without switching")
+    return 0
+
+
+def cli_connect(flags):
+    here = os.path.dirname(os.path.abspath(__file__))
+    script = next((p for p in (os.path.join(here, "register_mcp.py"), os.path.join(here, "..", "scripts", "register_mcp.py"))
+                   if os.path.isfile(p)), None)
+    if script is None:
+        print("register_mcp.py is not next to this bridge: install again (README), then run bridge.py connect.")
+        return 1
+    cmd = [sys.executable, "-I", script, "--bridge", os.path.abspath(__file__), "--python", sys.executable]
+    if flags.get("check"):
+        cmd.append("--check")
+    if flags.get("remove"):
+        cmd.append("--remove")
+    if isinstance(flags.get("clients"), str):
+        cmd += ["--clients", flags["clients"]]
+    return subprocess.call(cmd)
+
+
+# file signatures: the first bytes of a finished export
+SIGNATURES = {
+    ".pdf": [b"%PDF"], ".dwg": [b"AC10"], ".ifc": [b"ISO-10303-21"], ".png": [b"\x89PNG"], ".jpg": [b"\xff\xd8"],
+    ".jpeg": [b"\xff\xd8"], ".rvt": [b"\xd0\xcf\x11\xe0"], ".rfa": [b"\xd0\xcf\x11\xe0"], ".rte": [b"\xd0\xcf\x11\xe0"],
+    ".xlsx": [b"PK"], ".zip": [b"PK"], ".dwfx": [b"PK"], ".dwf": [b"(DWF"], ".bmp": [b"BM"], ".tif": [b"II*\x00", b"MM\x00*"],
+}
+
+
+def cli_verify(words, flags):
+    exts = {("." + e.strip().lstrip(".")).lower() for e in flags["ext"].split(",")} if isinstance(flags.get("ext"), str) else None
+    since = time.time() - float(flags["since"]) * 60 if flags.get("since") not in (None, True, False) else None
+    files = []
+    for word in words:
+        if os.path.isdir(word):
+            files += [os.path.join(word, n) for n in sorted(os.listdir(word)) if os.path.isfile(os.path.join(word, n))]
+        elif any(ch in word for ch in "*?["):
+            files += sorted(glob.glob(word))
+        else:
+            files.append(word)
+    if exts:
+        files = [f for f in files if os.path.splitext(f)[1].lower() in exts]
+    if since is not None:
+        files = [f for f in files if not os.path.exists(f) or os.path.getmtime(f) >= since]
+    failed = []
+    for path in files:
+        problem = None
+        if not os.path.isfile(path):
+            problem = "missing"
+        elif os.path.getsize(path) == 0:
+            problem = "empty"
+        else:
+            ext = os.path.splitext(path)[1].lower()
+            with open(path, "rb") as f:
+                head = f.read(4096)
+            if ext == ".dxf":
+                problem = None if b"SECTION" in head else "not a DXF (no SECTION)"
+            elif ext in SIGNATURES and not any(head.startswith(sig) for sig in SIGNATURES[ext]):
+                problem = "does not start like a {} file".format(ext)
+        if problem:
+            failed.append({"path": path, "problem": problem})
+    report = {"checked": len(files), "ok": len(files) - len(failed), "failed": failed}
+    expect = flags.get("expect")
+    if expect not in (None, True, False):
+        report["expected"] = int(expect)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    good = not failed and len(files) > 0 and ("expected" not in report or report["ok"] == report["expected"])
+    return 0 if good else 1
+
+
+def cli(argv):
+    """bridge.py <command> ...: exit code."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # Windows consoles: names with any character
+    except (AttributeError, ValueError):
+        pass
+    words, flags = cli_parse(argv)
+    command, rest = (words[0], words[1:]) if words else ("help", [])
+    if State.client is None:
+        State.client = {"name": AGENT or "cli", "version": BRIDGE_VERSION, "session": SESSION}
+    try:
+        if command not in CLI_COMMANDS or (command == "help" and not rest):
+            print(CLI_HELP)
+            return 0 if command == "help" else 2
+        if command == "status":
+            return check()
+        if command == "tools":
+            return cli_list(rest)
+        if command == "help":
+            return cli_help(rest[0])
+        if command == "call":
+            if not rest:
+                raise CliError("call needs a tool name: bridge.py call <tool> --param=value")
+            return cli_call(rest[0], flags)
+        if command == "cursors":
+            action = rest[0] if rest else "status"
+            if action not in ("status", "on", "pause"):
+                raise CliError("cursors: status, on or pause (only the user turns it off or resumes)")
+            return cli_call("agent_cursors", dict(flags, action=action))
+        if command == "reload":
+            return cli_call("reload_addin", flags)
+        if command == "connect":
+            return cli_connect(flags)
+        if command == "verify":
+            if not rest:
+                raise CliError("verify needs files, folders or patterns")
+            return cli_verify(rest, flags)
+    except CliError as ex:
+        print(json.dumps({"error_code": "bad_arguments", "message": str(ex), "nothing_ran": True}, ensure_ascii=False))
+        return 2
+    return 2
+
+
 def main():
+    if "--version" in sys.argv:
+        print(BRIDGE_VERSION)
+        return
+    if "--check" in sys.argv:
+        sys.exit(check())
+    if any(not a.startswith("--") for a in sys.argv[1:]):   # a command: the command line, not the MCP server
+        sys.exit(cli(sys.argv[1:]))
     log("bridge {} (ports {}-{}, tier {}, lane {}, queue wait {} s)".format(BRIDGE_VERSION, PORT_MIN, PORT_MAX, TIER, LANE, QUEUE_WAIT_S))
     pool = ThreadPoolExecutor(max_workers=4)
     threading.Thread(target=watcher, args=(Output.send,), daemon=True).start()

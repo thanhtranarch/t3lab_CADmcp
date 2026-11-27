@@ -51,7 +51,7 @@ namespace T3LabCAD.Core
                     P("new_name", Str("Rename the style")),
                     P("make_current", Bool("Make it the current dimension style")),
                     P("update_dimensions", Bool("Recompute dimensions that use the style (default true)"))),
-                SetDimStyle);
+                SetDimStyle, scope: ToolScope.Active);
 
             Registry.Add("load_linetype", "Load linetypes", ToolKind.Write,
                 "Load linetypes from a .lin file (default acadiso.lin, else acad.lin). names accepts wildcards (DASH*, *). " +
